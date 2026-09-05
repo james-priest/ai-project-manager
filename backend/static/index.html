@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Project Management MVP</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: system-ui, sans-serif;
+        background: #f7f8fb;
+        color: #032147;
+      }
+
+      body {
+        display: grid;
+        min-height: 100vh;
+        margin: 0;
+        place-items: center;
+      }
+
+      main {
+        width: min(90vw, 36rem);
+        padding: 2rem;
+        border: 1px solid rgba(3, 33, 71, 0.12);
+        border-radius: 1rem;
+        background: #fff;
+        box-shadow: 0 18px 40px rgba(3, 33, 71, 0.12);
+      }
+
+      h1 {
+        margin-top: 0;
+      }
+
+      #api-result {
+        color: #753991;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Backend scaffolding ready</h1>
+      <p>FastAPI is serving this static page.</p>
+      <p id="api-result">Checking the example API...</p>
+    </main>
+    <script>
+      fetch("/api/example")
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error("The example API returned an error.");
+          }
+          return response.json();
+        })
+        .then((data) => {
+          document.querySelector("#api-result").textContent =
+            `Example API: ${data.message}`;
+        })
+        .catch(() => {
+          document.querySelector("#api-result").textContent =
+            "Example API: unavailable";
+        });
+    </script>
+  </body>
+</html>

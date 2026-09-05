@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.next
+node_modules
+frontend/node_modules
+frontend/.next
+frontend/out
+backend/.venv
+backend/__pycache__
+backend/.pytest_cache
+*.pyc
+*.db
+*.db-journal
+htmlcov
+coverage

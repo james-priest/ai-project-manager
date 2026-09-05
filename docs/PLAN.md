@@ -32,7 +32,7 @@ Status: Part 1 is ready for user approval. No implementation beyond the planning
 - [x] Inspect the existing frontend components, data model, scripts, and test configuration.
 - [x] Record the existing frontend architecture in `frontend/AGENTS.md`.
 - [x] Expand this document with implementation checklists, tests, and success criteria.
-- [ ] Obtain user approval for this plan.
+- [x] Obtain user approval for this plan.
 
 Tests:
 
@@ -46,15 +46,15 @@ Success criteria:
 
 ## Part 2: Docker and backend scaffolding
 
-- [ ] Create the minimal FastAPI application in `backend/`.
-- [ ] Add a health endpoint and a simple example API endpoint.
-- [ ] Add a minimal static HTML response or placeholder static directory so the container can prove that `/` is served by FastAPI.
-- [ ] Add the Python project configuration and dependencies managed by `uv`.
-- [ ] Add a multi-stage Docker build that builds the frontend assets and runs FastAPI.
-- [ ] Add local Docker configuration with a persistent location for the SQLite database.
-- [ ] Add start and stop scripts for macOS/Linux and Windows in `scripts/`, following `scripts/AGENTS.md`.
-- [ ] Document the minimum local setup, environment file, ports, and start/stop commands.
-- [ ] Keep the backend's static-file and API routing arrangement compatible with the later Next.js static export.
+- [x] Create the minimal FastAPI application in `backend/`.
+- [x] Add a health endpoint and a simple example API endpoint.
+- [x] Add a minimal static HTML response or placeholder static directory so the container can prove that `/` is served by FastAPI.
+- [x] Add the Python project configuration and dependencies managed by `uv`.
+- [x] Add a multi-stage Docker build that builds the frontend assets and runs FastAPI.
+- [x] Add local Docker configuration with a persistent location for the SQLite database.
+- [x] Add start and stop scripts for macOS/Linux and Windows in `scripts/`, following `scripts/AGENTS.md`.
+- [x] Document the minimum local setup, environment file, ports, and start/stop commands.
+- [x] Keep the backend's static-file and API routing arrangement compatible with the later Next.js static export.
 
 Tests:
 
