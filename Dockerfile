@@ -19,13 +19,12 @@ RUN uv sync --project /app/backend --locked --no-dev
 
 COPY backend/ backend/
 
-# Part 2 builds the Next.js assets to validate the complete image build.
-# Part 3 will configure the export and serve these assets through FastAPI.
-COPY --from=frontend-builder /app/frontend/.next /app/frontend-build/.next
+COPY --from=frontend-builder /app/frontend/out /app/frontend-out
 
 ENV PATH="/app/backend/.venv/bin:$PATH"
 ENV PYTHONPATH="/app/backend"
 ENV PYTHONUNBUFFERED=1
+ENV FRONTEND_STATIC_DIR="/app/frontend-out"
 
 EXPOSE 8000
 

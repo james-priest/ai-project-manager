@@ -1,6 +1,6 @@
 # Project Management MVP implementation plan
 
-Status: Part 1 is ready for user approval. No implementation beyond the planning documentation and frontend description should begin until this plan is approved.
+Status: Parts 1 through 3 are complete. Part 4 is next.
 
 ## Agreed constraints and decisions
 
@@ -71,12 +71,12 @@ Success criteria:
 
 ## Part 3: Add the existing frontend as a static site
 
-- [ ] Configure the existing Next.js app for a static export compatible with FastAPI static serving.
-- [ ] Preserve the current visual design and color variables from `frontend/src/app/globals.css`.
-- [ ] Copy or mount the generated static output into the backend image at build time.
-- [ ] Make FastAPI serve the exported site at `/` and retain `/api/*` for backend routes.
-- [ ] Preserve the current demo behavior: five columns, column renaming, card creation, card removal, and drag-and-drop.
-- [ ] Replace only the minimum browser-incompatible behavior required by static hosting.
+- [x] Configure the existing Next.js app for a static export compatible with FastAPI static serving.
+- [x] Preserve the current visual design and color variables from `frontend/src/app/globals.css`.
+- [x] Copy or mount the generated static output into the backend image at build time.
+- [x] Make FastAPI serve the exported site at `/` and retain `/api/*` for backend routes.
+- [x] Preserve the current demo behavior: five columns, column renaming, card creation, card removal, and drag-and-drop.
+- [x] Replace only the minimum browser-incompatible behavior required by static hosting.
 
 Tests:
 

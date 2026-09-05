@@ -2,7 +2,7 @@
 
 ## Current application
 
-This directory contains the existing Kanban Studio frontend. It is a Next.js 16 App Router application using TypeScript, React 19, Tailwind CSS 4, and `@dnd-kit` for drag and drop.
+This directory contains the existing Kanban Studio frontend. It is a Next.js 16 App Router application using TypeScript, React 19, Tailwind CSS 4, and `@dnd-kit` for drag and drop. `next.config.ts` is configured for a static export; production builds write the site to `out/` for FastAPI to serve.
 
 The current app is a frontend-only demo. `src/app/page.tsx` renders `KanbanBoard`, and the board is held in React state initialized from `src/lib/kanban.ts`. There is currently no authentication, backend API, persistence, or AI chat.
 
@@ -36,7 +36,7 @@ npm run test:e2e
 npm run test:all
 ```
 
-Vitest uses jsdom, Testing Library, `user-event`, and the setup file at `src/test/setup.ts`. Playwright starts the Next.js development server at `http://127.0.0.1:3000`.
+Vitest uses jsdom, Testing Library, `user-event`, and the setup file at `src/test/setup.ts`. Playwright starts the Next.js development server at `http://127.0.0.1:3000` by default. Set `PLAYWRIGHT_BASE_URL` to test an externally running container; set `PLAYWRIGHT_CHANNEL=chrome` when using an installed system Chrome.
 
 ## Conventions for future work
 
