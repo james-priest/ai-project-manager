@@ -1,6 +1,6 @@
 # Project Management MVP implementation plan
 
-Status: Parts 1 through 4 are complete. Part 5 is next.
+Status: Part 5 schema proposal is ready for sign-off. Part 6 awaits approval.
 
 ## Agreed constraints and decisions
 
@@ -117,12 +117,12 @@ Success criteria:
 
 ## Part 5: Database modeling and approval
 
-- [ ] Propose the SQLite schema for users, boards, columns, cards, and any required session metadata.
-- [ ] Define primary keys, foreign keys, ordering fields, timestamps, and deletion behavior.
-- [ ] Define the canonical board JSON representation used by the frontend and AI prompt.
-- [ ] Save the proposal as `docs/database-schema.json`.
-- [ ] Add a short explanation in `docs/` covering why the relational storage and board JSON shape are separate concerns.
-- [ ] Include seed data for the single MVP user and the existing demo board without duplicating cards within a column.
+- [x] Propose the SQLite schema for users, boards, columns, cards, and any required session metadata.
+- [x] Define primary keys, foreign keys, ordering fields, timestamps, and deletion behavior.
+- [x] Define the canonical board JSON representation used by the frontend and AI prompt.
+- [x] Save the proposal as `docs/database-schema.json`.
+- [x] Add a short explanation in `docs/` covering why the relational storage and board JSON shape are separate concerns.
+- [x] Include seed data for the single MVP user and the existing demo board without duplicating cards within a column.
 - [ ] Obtain user sign-off on the schema before implementing persistent board access.
 
 Tests:

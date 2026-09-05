@@ -1,0 +1,322 @@
+{
+  "schema_version": 1,
+  "purpose": "SQLite storage design for the Project Management MVP",
+  "storage": {
+    "engine": "SQLite",
+    "database_path_environment_variable": "DATABASE_PATH",
+    "foreign_keys": "Enable PRAGMA foreign_keys = ON for every connection",
+    "timestamps": "Store UTC timestamps as ISO 8601 text",
+    "mutation_rule": "Board mutations update ordering and membership in one transaction"
+  },
+  "tables": [
+    {
+      "name": "users",
+      "purpose": "Application users; supports more users beyond the MVP account",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": true
+        },
+        {
+          "name": "username",
+          "type": "TEXT",
+          "nullable": false,
+          "unique": true
+        },
+        {
+          "name": "password_hash",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      ]
+    },
+    {
+      "name": "boards",
+      "purpose": "One Kanban board per user for the MVP",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": true
+        },
+        {
+          "name": "user_id",
+          "type": "TEXT",
+          "nullable": false,
+          "references": "users.id",
+          "on_delete": "CASCADE",
+          "unique": true
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "constraints": [
+        "UNIQUE(user_id)"
+      ]
+    },
+    {
+      "name": "columns",
+      "purpose": "Ordered, renameable workflow columns belonging to a board",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": true
+        },
+        {
+          "name": "board_id",
+          "type": "TEXT",
+          "nullable": false,
+          "references": "boards.id",
+          "on_delete": "CASCADE"
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "position",
+          "type": "INTEGER",
+          "nullable": false,
+          "check": "position >= 0"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "constraints": [
+        "UNIQUE(board_id, position)"
+      ]
+    },
+    {
+      "name": "cards",
+      "purpose": "Cards assigned to an ordered position within one column",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": true
+        },
+        {
+          "name": "column_id",
+          "type": "TEXT",
+          "nullable": false,
+          "references": "columns.id",
+          "on_delete": "CASCADE"
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "details",
+          "type": "TEXT",
+          "nullable": false,
+          "default": ""
+        },
+        {
+          "name": "position",
+          "type": "INTEGER",
+          "nullable": false,
+          "check": "position >= 0"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "constraints": [
+        "UNIQUE(column_id, position)"
+      ]
+    }
+  ],
+  "relationships": [
+    "users.id 1-to-1 boards.user_id for the MVP; the unique constraint can be relaxed later",
+    "boards.id 1-to-many columns.board_id",
+    "columns.id 1-to-many cards.column_id"
+  ],
+  "session_storage": {
+    "persistent": false,
+    "location": "FastAPI process memory",
+    "reason": "The MVP runs as one local container and the current Part 4 session design does not require session recovery after restart",
+    "future_option": "Add a sessions table only if the app later needs multi-process deployment or session recovery"
+  },
+  "canonical_board_json": {
+    "description": "The API and AI payload preserves the existing frontend BoardData shape. Database positions and column membership are serialized into ordered cardIds.",
+    "shape": {
+      "columns": [
+        {
+          "id": "string",
+          "title": "string",
+          "cardIds": ["string"]
+        }
+      ],
+      "cards": {
+        "card-id": {
+          "id": "string",
+          "title": "string",
+          "details": "string"
+        }
+      }
+    },
+    "invariants": [
+      "Every column id is unique within the board",
+      "Every card id is unique within the board",
+      "Every card appears exactly once in one column's cardIds",
+      "Every card in cardIds has a matching entry in cards with the same id",
+      "The order of columns and cardIds is authoritative"
+    ]
+  },
+  "seed_data": {
+    "users": [
+      {
+        "id": "user-1",
+        "username": "user",
+        "password_hash": "<generated hash of the MVP password>",
+        "note": "The placeholder is not a literal stored password; initialization must generate the hash from the MVP credential."
+      }
+    ],
+    "boards": [
+      {
+        "id": "board-user-1",
+        "user_id": "user-1",
+        "title": "Kanban Studio"
+      }
+    ],
+    "columns": [
+      {
+        "id": "col-backlog",
+        "board_id": "board-user-1",
+        "title": "Backlog",
+        "position": 0
+      },
+      {
+        "id": "col-discovery",
+        "board_id": "board-user-1",
+        "title": "Discovery",
+        "position": 1
+      },
+      {
+        "id": "col-progress",
+        "board_id": "board-user-1",
+        "title": "In Progress",
+        "position": 2
+      },
+      {
+        "id": "col-review",
+        "board_id": "board-user-1",
+        "title": "Review",
+        "position": 3
+      },
+      {
+        "id": "col-done",
+        "board_id": "board-user-1",
+        "title": "Done",
+        "position": 4
+      }
+    ],
+    "cards": [
+      {
+        "id": "card-1",
+        "column_id": "col-backlog",
+        "title": "Align roadmap themes",
+        "details": "Draft quarterly themes with impact statements and metrics.",
+        "position": 0
+      },
+      {
+        "id": "card-2",
+        "column_id": "col-backlog",
+        "title": "Gather customer signals",
+        "details": "Review support tags, sales notes, and churn feedback.",
+        "position": 1
+      },
+      {
+        "id": "card-3",
+        "column_id": "col-discovery",
+        "title": "Prototype analytics view",
+        "details": "Sketch initial dashboard layout and key drill-downs.",
+        "position": 0
+      },
+      {
+        "id": "card-4",
+        "column_id": "col-progress",
+        "title": "Refine status language",
+        "details": "Standardize column labels and tone across the board.",
+        "position": 0
+      },
+      {
+        "id": "card-5",
+        "column_id": "col-progress",
+        "title": "Design card layout",
+        "details": "Add hierarchy and spacing for scanning dense lists.",
+        "position": 1
+      },
+      {
+        "id": "card-6",
+        "column_id": "col-review",
+        "title": "QA micro-interactions",
+        "details": "Verify hover, focus, and loading states.",
+        "position": 0
+      },
+      {
+        "id": "card-7",
+        "column_id": "col-done",
+        "title": "Ship marketing page",
+        "details": "Final copy approved and asset pack delivered.",
+        "position": 0
+      },
+      {
+        "id": "card-8",
+        "column_id": "col-done",
+        "title": "Close onboarding sprint",
+        "details": "Document release notes and share internally.",
+        "position": 1
+      }
+    ]
+  }
+}
