@@ -16,6 +16,8 @@ npm run test:unit
 npm run test:e2e
 ```
 
+The end-to-end command starts the full Docker Compose application by default, so it exercises the FastAPI API and the static frontend together.
+
 To run the browser journeys against the Docker container instead of the Next.js development server:
 
 ```bash

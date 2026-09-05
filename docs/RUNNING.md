@@ -27,4 +27,12 @@ The application is available at [http://127.0.0.1:3000](http://127.0.0.1:3000). 
 - `GET /api/health` returns `{ "status": "ok" }`.
 - `GET /api/example` returns `{ "message": "hello world" }`.
 
+## Part 4 authentication checks
+
+- Open `/` and confirm the sign-in form appears before the board.
+- Sign in with username `user` and password `password`.
+- Confirm the board appears and a `Log out` button is available.
+- Log out and reload `/`; confirm the sign-in form appears again.
+- Try an incorrect password and confirm an error is shown without revealing which credential was wrong.
+
 The SQLite volume is named `kanban-data` and is retained by the stop command for the persistence work in later parts.

@@ -36,7 +36,7 @@ npm run test:e2e
 npm run test:all
 ```
 
-Vitest uses jsdom, Testing Library, `user-event`, and the setup file at `src/test/setup.ts`. Playwright starts the Next.js development server at `http://127.0.0.1:3000` by default. Set `PLAYWRIGHT_BASE_URL` to test an externally running container; set `PLAYWRIGHT_CHANNEL=chrome` when using an installed system Chrome.
+Vitest uses jsdom, Testing Library, `user-event`, and the setup file at `src/test/setup.ts`. Playwright starts the full Docker Compose application at `http://127.0.0.1:3000` by default. Set `PLAYWRIGHT_BASE_URL` to test an externally running server; set `PLAYWRIGHT_CHANNEL=chrome` when using an installed system Chrome.
 
 ## Conventions for future work
 

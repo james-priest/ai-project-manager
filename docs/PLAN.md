@@ -1,6 +1,6 @@
 # Project Management MVP implementation plan
 
-Status: Parts 1 through 3 are complete. Part 4 is next.
+Status: Parts 1 through 4 are complete. Part 5 is next.
 
 ## Agreed constraints and decisions
 
@@ -93,14 +93,14 @@ Success criteria:
 
 ## Part 4: Fake user sign-in experience
 
-- [ ] Add a login view shown when no valid session exists.
-- [ ] Submit credentials to a FastAPI login route using `user` / `password`.
-- [ ] Create a server-side session and set an HTTP-only cookie on successful login.
-- [ ] Return a clear, accessible error for invalid credentials without revealing which field was wrong.
-- [ ] Add a session-check route used on initial page load.
-- [ ] Add a logout action that invalidates the server-side session and clears the cookie.
-- [ ] Protect the board route/API access from unauthenticated requests.
-- [ ] Keep the login implementation simple and avoid client-only authentication state as the source of truth.
+- [x] Add a login view shown when no valid session exists.
+- [x] Submit credentials to a FastAPI login route using `user` / `password`.
+- [x] Create a server-side session and set an HTTP-only cookie on successful login.
+- [x] Return a clear, accessible error for invalid credentials without revealing which field was wrong.
+- [x] Add a session-check route used on initial page load.
+- [x] Add a logout action that invalidates the server-side session and clears the cookie.
+- [x] Protect the board route/API access from unauthenticated requests.
+- [x] Keep the login implementation simple and avoid client-only authentication state as the source of truth.
 
 Tests:
 
