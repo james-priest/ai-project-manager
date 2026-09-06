@@ -8,7 +8,9 @@ from backend.app.main import SESSION_STORE, app
 def isolate_application_state(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.db"))
     SESSION_STORE.clear()
+    app.dependency_overrides.clear()
     yield
+    app.dependency_overrides.clear()
     SESSION_STORE.clear()
 
 

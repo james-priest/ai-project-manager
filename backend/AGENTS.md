@@ -2,7 +2,7 @@
 
 ## Current application
 
-The backend is a small FastAPI application. `app/main.py` serves the exported frontend (or a placeholder during backend-only development), exposes the health and authentication routes, and owns the authenticated board API. SQLite persistence lives in `app/database.py`; request and response models live in `app/schemas.py`.
+The backend is a small FastAPI application. `app/main.py` serves the exported frontend (or a placeholder during backend-only development), exposes the health, authentication, AI connectivity, and authenticated board API routes. SQLite persistence lives in `app/database.py`; request and response models live in `app/schemas.py`; the OpenRouter provider lives in `app/openrouter.py`.
 
 The project uses `uv` for Python dependency management. Runtime dependencies are declared in `pyproject.toml`; backend tests use pytest and FastAPI's test client.
 
@@ -10,6 +10,7 @@ The project uses `uv` for Python dependency management. Runtime dependencies are
 
 - `app/main.py`: FastAPI application, startup initialization, authentication, and board routes.
 - `app/database.py`: SQLite schema initialization, seed data, and board repository mutations.
+- `app/openrouter.py`: OpenRouter client, provider interface, request construction, and controlled provider errors.
 - `app/schemas.py`: typed board and mutation request/response models.
 - `static/index.html`: Part 2 placeholder page served at `/`.
 - `tests/`: backend unit and integration tests using temporary SQLite databases.

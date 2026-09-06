@@ -11,7 +11,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .database import BoardRepository, get_database_path, initialize_database
+from .openrouter import (
+    AIProvider,
+    OpenRouterClient,
+    OpenRouterConfigurationError,
+    OpenRouterError,
+    OpenRouterProviderError,
+    OpenRouterTimeoutError,
+)
 from .schemas import (
+    AIConnectivityResponse,
     BoardData,
     CreateCardRequest,
     MoveCardRequest,
@@ -115,6 +124,32 @@ def logout(request: Request, response: Response) -> dict[str, bool]:
 @app.get("/api/example")
 def example(_: str = Depends(get_current_user)) -> dict[str, str]:
     return {"message": "hello world"}
+
+
+CONNECTIVITY_PROMPT = "2+2"
+
+
+def get_ai_provider() -> AIProvider:
+    return OpenRouterClient()
+
+
+@app.post("/api/ai/connectivity", response_model=AIConnectivityResponse)
+def ai_connectivity(
+    _: str = Depends(get_current_user),
+    provider: AIProvider = Depends(get_ai_provider),
+) -> AIConnectivityResponse:
+    try:
+        response = provider.complete(CONNECTIVITY_PROMPT)
+    except OpenRouterConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except OpenRouterTimeoutError as error:
+        raise HTTPException(status_code=504, detail=str(error)) from error
+    except OpenRouterProviderError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except OpenRouterError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+    return AIConnectivityResponse(prompt=CONNECTIVITY_PROMPT, response=response)
 
 
 def get_board_repository() -> BoardRepository:

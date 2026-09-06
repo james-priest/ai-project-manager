@@ -1,6 +1,6 @@
 # Project Management MVP implementation plan
 
-Status: Parts 1 through 7 are complete. Part 8 is next.
+Status: Parts 1 through 8 are complete. Part 9 is next.
 
 ## Agreed constraints and decisions
 
@@ -188,23 +188,24 @@ Success criteria:
 
 ## Part 8: OpenRouter connectivity
 
-- [ ] Add a backend AI client that reads `OPENROUTER_API_KEY` from the environment.
-- [ ] Use `openai/gpt-oss-120b` exactly as the configured model.
-- [ ] Add a minimal internal service/route that sends the test prompt `2+2` and returns the model response.
-- [ ] Set a bounded request timeout and return a useful application error for provider failures.
-- [ ] Never log the API key or full sensitive request headers.
-- [ ] Keep the provider behind a small interface so normal tests can use a fake provider.
+- [x] Add a backend AI client that reads `OPENROUTER_API_KEY` from the environment.
+- [x] Use `openai/gpt-oss-120b` exactly as the configured model.
+- [x] Add the authenticated `POST /api/ai/connectivity` route that sends the test prompt `2+2` and returns the model response.
+- [x] Use the synchronous `httpx` client with a 20-second timeout and return useful application errors for provider failures.
+- [x] Never log the API key or full sensitive request headers.
+- [x] Keep the provider behind the `AIProvider` interface so normal tests can use a fake provider.
 
 Tests:
 
-- Unit tests for request construction, configuration errors, timeout handling, provider errors, and response parsing using a mocked HTTP/provider client.
+- Unit tests for request construction, configuration errors, timeout handling, provider errors, and response parsing using an `httpx` mock transport.
+- Backend integration tests for authentication, successful responses, and controlled provider/configuration errors.
 - An opt-in live connectivity test using the real key and the `2+2` prompt.
 - Verify normal unit/integration test commands do not require network access or a real API key.
 
 Success criteria:
 
-- With a valid key, the backend can complete the `2+2` connectivity check through OpenRouter.
-- Without a key or when OpenRouter fails, the app returns a controlled error and remains running.
+- [x] With a valid key, the backend can complete the `2+2` connectivity check through OpenRouter.
+- [x] Without a key or when OpenRouter fails, the app returns a controlled error and remains running.
 
 ## Part 9: Structured AI board operations
 

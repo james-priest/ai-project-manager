@@ -5,7 +5,7 @@
 - Docker with Docker Compose support
 - A project-root `.env` file. Copy `.env.example` to `.env` if needed.
 
-The OpenRouter key can remain in `.env` for later work, but Part 2 does not pass it into the container or call OpenRouter.
+The OpenRouter key is read from `.env` and passed into the container for the Part 8 connectivity route. Do not commit `.env` or print the key in logs.
 
 ## Start and stop
 
@@ -48,3 +48,17 @@ The application is available at [http://127.0.0.1:3000](http://127.0.0.1:3000). 
 - Rename a column, add a card, edit it, remove it, and move a card between columns.
 - Reload the page after each change and confirm the latest board state remains.
 - If a request fails, confirm the visible board state is restored and an error is shown.
+
+## Part 8 OpenRouter check
+
+- Sign in before calling the protected `POST /api/ai/connectivity` route.
+- With a configured key, the route sends `2+2` to OpenRouter using `openai/gpt-oss-120b` and returns the provider response.
+- Without a key or when the provider is unavailable, the route returns a controlled error without exposing the key.
+- Normal backend tests use mocked provider transports. To opt into the live test, export the key and set `RUN_LIVE_OPENROUTER_TESTS=1` before running:
+
+```bash
+set -a
+source .env
+set +a
+RUN_LIVE_OPENROUTER_TESTS=1 uv run --project backend pytest backend/tests/test_openrouter.py -k live
+```

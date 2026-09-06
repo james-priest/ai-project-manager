@@ -18,6 +18,11 @@ class BoardData(BaseModel):
     cards: dict[str, CardData]
 
 
+class AIConnectivityResponse(BaseModel):
+    prompt: str
+    response: str
+
+
 class RenameColumnRequest(BaseModel):
     title: str
 
