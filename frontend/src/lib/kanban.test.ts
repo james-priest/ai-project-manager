@@ -1,4 +1,9 @@
-import { moveCard, type Column } from "@/lib/kanban";
+import {
+  getCardDropPosition,
+  moveCard,
+  moveCardToPosition,
+  type Column,
+} from "@/lib/kanban";
 
 describe("moveCard", () => {
   const baseColumns: Column[] = [
@@ -21,5 +26,25 @@ describe("moveCard", () => {
     const result = moveCard(baseColumns, "card-1", "col-b");
     expect(result[0].cardIds).toEqual(["card-2"]);
     expect(result[1].cardIds).toEqual(["card-3", "card-1"]);
+  });
+
+  it("calculates a position after the last target card", () => {
+    const position = getCardDropPosition(
+      ["card-3"],
+      "card-2",
+      "card-3",
+      false,
+      { top: 200, height: 80 },
+      { top: 100, height: 80 }
+    );
+
+    expect(position).toBe(1);
+  });
+
+  it("moves a card to the last position in another column", () => {
+    const result = moveCardToPosition(baseColumns, "card-2", "col-b", 1);
+
+    expect(result[0].cardIds).toEqual(["card-1"]);
+    expect(result[1].cardIds).toEqual(["card-3", "card-2"]);
   });
 });

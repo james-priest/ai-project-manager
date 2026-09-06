@@ -1,6 +1,6 @@
 # Project Management MVP implementation plan
 
-Status: Parts 1 through 6 are complete. Part 7 is next.
+Status: Parts 1 through 7 are complete. Part 8 is next.
 
 ## Agreed constraints and decisions
 
@@ -165,13 +165,13 @@ Success criteria:
 
 ## Part 7: Connect the frontend to the backend
 
-- [ ] Replace the frontend's in-memory board source with the authenticated board API.
-- [ ] Add a small typed API client for auth and board operations.
-- [ ] Load the board after session verification and show clear loading/empty/error states.
-- [ ] Persist column renames, card creation, card edits, card removal, and drag-and-drop moves.
-- [ ] Keep UI state and server state synchronized after successful mutations.
-- [ ] Recover cleanly from failed mutations without silently losing the user's visible board state.
-- [ ] Ensure the static frontend uses same-origin `/api` requests in the container.
+- [x] Replace the frontend's in-memory board source with the authenticated board API.
+- [x] Add a small typed API client for auth and board operations.
+- [x] Load the board after session verification and show clear loading/empty/error states.
+- [x] Persist column renames, card creation, card edits, card removal, and drag-and-drop moves.
+- [x] Keep UI state and server state synchronized after successful mutations.
+- [x] Recover cleanly from failed mutations without silently losing the user's visible board state.
+- [x] Ensure the static frontend uses same-origin `/api` requests in the container.
 
 Tests:
 

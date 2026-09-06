@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AuthGate } from "@/components/AuthGate";
+import { initialData } from "@/lib/kanban";
 
 describe("AuthGate", () => {
   afterEach(() => {
@@ -16,7 +17,10 @@ describe("AuthGate", () => {
   });
 
   it("shows the login form when the session is unauthenticated", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 401 })
+    );
 
     render(<AuthGate />);
 
@@ -24,13 +28,41 @@ describe("AuthGate", () => {
     expect(screen.queryByRole("heading", { name: "Kanban Studio" })).not.toBeInTheDocument();
   });
 
-  it("shows the board after a successful login", async () => {
+  it("shows a retry state when the board cannot be loaded", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({ ok: false })
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ authenticated: true, username: "user" }),
+      })
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ authenticated: true, username: "user" }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => initialData });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AuthGate />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Unable to load your board. Please try again."
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+  });
+
+  it("shows the board after a successful login", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 401 })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ authenticated: true, username: "user" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => initialData,
       });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
@@ -48,13 +80,23 @@ describe("AuthGate", () => {
       credentials: "same-origin",
       body: JSON.stringify({ username: "user", password: "password" }),
     });
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/board", {
+      credentials: "same-origin",
+    });
   });
 
   it("logs out and returns to the login form", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ ok: true });
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ authenticated: true, username: "user" }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => initialData })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ authenticated: false }),
+      });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
 
@@ -63,7 +105,7 @@ describe("AuthGate", () => {
     await user.click(screen.getByRole("button", { name: "Log out" }));
 
     expect(await screen.findByRole("heading", { name: /sign in/i })).toBeVisible();
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/auth/logout", {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/auth/logout", {
       method: "POST",
       credentials: "same-origin",
     });
@@ -72,8 +114,12 @@ describe("AuthGate", () => {
   it("keeps the board and reports a logout error", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ ok: false });
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ authenticated: true, username: "user" }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => initialData })
+      .mockResolvedValueOnce({ ok: false, status: 500 });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
 

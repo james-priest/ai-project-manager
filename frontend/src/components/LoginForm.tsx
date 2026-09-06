@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { ApiError, api } from "@/lib/api";
 
 type LoginFormProps = {
-  onAuthenticated: (username: string) => void;
+  onAuthenticated: (username: string) => void | Promise<void>;
 };
 
 export const LoginForm = ({ onAuthenticated }: LoginFormProps) => {
@@ -18,21 +19,18 @@ export const LoginForm = ({ onAuthenticated }: LoginFormProps) => {
     setError(null);
 
     try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ username, password }),
-      });
-
-      if (!response.ok) {
+      const data = await api.login(username, password);
+      if (!data.authenticated) {
         setError("Invalid username or password.");
         return;
       }
 
-      const data = (await response.json()) as { username: string };
-      onAuthenticated(data.username);
-    } catch {
+      await onAuthenticated(data.username);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setError("Invalid username or password.");
+        return;
+      }
       setError("Unable to sign in. Please try again.");
     } finally {
       setIsSubmitting(false);

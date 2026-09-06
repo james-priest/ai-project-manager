@@ -3,21 +3,32 @@ import { useState, type FormEvent } from "react";
 const initialFormState = { title: "", details: "" };
 
 type NewCardFormProps = {
-  onAdd: (title: string, details: string) => void;
+  onAdd: (title: string, details: string) => void | Promise<void>;
 };
 
 export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [formState, setFormState] = useState(initialFormState);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!formState.title.trim()) {
       return;
     }
-    onAdd(formState.title.trim(), formState.details.trim());
-    setFormState(initialFormState);
-    setIsOpen(false);
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await onAdd(formState.title.trim(), formState.details.trim());
+      setFormState(initialFormState);
+      setIsOpen(false);
+    } catch {
+      setError("Unable to add card. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -30,6 +41,7 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
               setFormState((prev) => ({ ...prev, title: event.target.value }))
             }
             placeholder="Card title"
+            disabled={isSubmitting}
             className="w-full rounded-xl border border-[var(--stroke)] bg-white px-3 py-2 text-sm font-medium text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)]"
             required
           />
@@ -40,17 +52,20 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
             }
             placeholder="Details"
             rows={3}
+            disabled={isSubmitting}
             className="w-full resize-none rounded-xl border border-[var(--stroke)] bg-white px-3 py-2 text-sm text-[var(--gray-text)] outline-none transition focus:border-[var(--primary-blue)]"
           />
           <div className="flex items-center gap-2">
             <button
               type="submit"
+              disabled={isSubmitting}
               className="rounded-full bg-[var(--secondary-purple)] px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:brightness-110"
             >
-              Add card
+              {isSubmitting ? "Adding..." : "Add card"}
             </button>
             <button
               type="button"
+              disabled={isSubmitting}
               onClick={() => {
                 setIsOpen(false);
                 setFormState(initialFormState);
@@ -60,6 +75,11 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
               Cancel
             </button>
           </div>
+          {error && (
+            <p role="alert" className="text-sm font-semibold text-red-700">
+              {error}
+            </p>
+          )}
         </form>
       ) : (
         <button

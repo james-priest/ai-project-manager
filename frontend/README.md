@@ -13,6 +13,7 @@ The production build writes a static export to `out/`. The project Docker image 
 
 ```bash
 npm run test:unit
+npm run test:coverage
 npm run test:e2e
 ```
 

@@ -1,35 +1,77 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { KanbanBoard } from "@/components/KanbanBoard";
 import { LoginForm } from "@/components/LoginForm";
+import { ApiError, api } from "@/lib/api";
+import type { BoardData } from "@/lib/kanban";
+
+type WorkspaceState =
+  | "loading"
+  | "unauthenticated"
+  | "authenticated"
+  | "error";
 
 export const AuthGate = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [workspaceState, setWorkspaceState] =
+    useState<WorkspaceState>("loading");
+  const [board, setBoard] = useState<BoardData | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/auth/me", { credentials: "same-origin" })
-      .then((response) => setIsAuthenticated(response.ok))
-      .catch(() => setIsAuthenticated(false));
+  const handleLoadError = useCallback((loadError: unknown) => {
+    if (loadError instanceof ApiError && loadError.status === 401) {
+      setBoard(null);
+      setWorkspaceState("unauthenticated");
+      return;
+    }
+
+    setError("Unable to load your board. Please try again.");
+    setWorkspaceState("error");
   }, []);
+
+  const loadBoard = useCallback(async () => {
+    setWorkspaceState("loading");
+    setError(null);
+
+    try {
+      setBoard(await api.getBoard());
+      setWorkspaceState("authenticated");
+    } catch (loadError) {
+      handleLoadError(loadError);
+    }
+  }, [handleLoadError]);
+
+  const loadWorkspace = useCallback(async () => {
+    setWorkspaceState("loading");
+    setError(null);
+
+    try {
+      const currentUser = await api.getCurrentUser();
+      if (!currentUser.authenticated) {
+        setWorkspaceState("unauthenticated");
+        return;
+      }
+
+      setBoard(await api.getBoard());
+      setWorkspaceState("authenticated");
+    } catch (loadError) {
+      handleLoadError(loadError);
+    }
+  }, [handleLoadError]);
+
+  useEffect(() => {
+    void loadWorkspace();
+  }, [loadWorkspace]);
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
     setError(null);
 
     try {
-      const response = await fetch("/api/auth/logout", {
-        method: "POST",
-        credentials: "same-origin",
-      });
-
-      if (!response.ok) {
-        throw new Error("Logout failed");
-      }
-
-      setIsAuthenticated(false);
+      await api.logout();
+      setBoard(null);
+      setWorkspaceState("unauthenticated");
     } catch {
       setError("Unable to sign out. Please try again.");
     } finally {
@@ -37,7 +79,7 @@ export const AuthGate = () => {
     }
   };
 
-  if (isAuthenticated === null) {
+  if (workspaceState === "loading") {
     return (
       <main className="flex min-h-screen items-center justify-center px-6">
         <p role="status" className="text-sm font-semibold text-[var(--gray-text)]">
@@ -47,13 +89,30 @@ export const AuthGate = () => {
     );
   }
 
-  if (!isAuthenticated) {
-    return <LoginForm onAuthenticated={() => setIsAuthenticated(true)} />;
+  if (workspaceState === "error") {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-4 px-6">
+        <p role="alert" className="text-sm font-semibold text-red-700">
+          {error}
+        </p>
+        <button
+          type="button"
+          onClick={() => void loadWorkspace()}
+          className="rounded-full bg-[var(--secondary-purple)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:brightness-110"
+        >
+          Try again
+        </button>
+      </main>
+    );
+  }
+
+  if (workspaceState === "unauthenticated") {
+    return <LoginForm onAuthenticated={loadBoard} />;
   }
 
   return (
     <>
-      {error && (
+      {error && workspaceState === "authenticated" && (
         <p
           role="alert"
           className="fixed right-6 top-6 z-10 rounded-xl bg-red-100 px-4 py-3 text-sm font-semibold text-red-800 shadow-lg"
@@ -61,7 +120,13 @@ export const AuthGate = () => {
           {error}
         </p>
       )}
-      <KanbanBoard onLogout={handleLogout} isLoggingOut={isLoggingOut} />
+      {board && (
+        <KanbanBoard
+          initialBoard={board}
+          onLogout={handleLogout}
+          isLoggingOut={isLoggingOut}
+        />
+      )}
     </>
   );
 };

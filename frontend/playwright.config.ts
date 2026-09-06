@@ -8,6 +8,7 @@ const projectRoot = path.resolve(__dirname, "..");
 export default defineConfig({
   testDir: "./tests",
   timeout: 60_000,
+  workers: 1,
   expect: {
     timeout: 10_000,
   },

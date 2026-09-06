@@ -4,13 +4,14 @@
 
 This directory contains the existing Kanban Studio frontend. It is a Next.js 16 App Router application using TypeScript, React 19, Tailwind CSS 4, and `@dnd-kit` for drag and drop. `next.config.ts` is configured for a static export; production builds write the site to `out/` for FastAPI to serve.
 
-The current app still holds its demo board in React state initialized from `src/lib/kanban.ts`; backend board persistence is connected in Part 7. `src/app/page.tsx` renders `AuthGate`, which checks the FastAPI session and shows the existing board after sign-in. There is no AI chat yet.
+The current app loads the authenticated board from FastAPI and keeps the working board state in `KanbanBoard` while mutations are persisted through `src/lib/api.ts`. `src/app/page.tsx` renders `AuthGate`, which checks the FastAPI session, loads the board, and shows clear loading/error states. There is no AI chat yet.
 
 ## Structure
 
 - `src/app/`: Next.js layout, page, global styles, and favicon.
 - `src/components/`: board, column, card, drag preview, and new-card form components.
 - `src/lib/kanban.ts`: `Card`, `Column`, and `BoardData` types, demo data, card movement, and ID creation.
+- `src/lib/api.ts`: typed same-origin auth and board API client.
 - `src/test/`: Vitest setup and type declarations.
 - `src/**/*.test.ts(x)`: Vitest unit/component tests.
 - `tests/`: Playwright browser integration tests.
@@ -18,9 +19,9 @@ The current app still holds its demo board in React state initialized from `src/
 
 ## Existing behavior
 
-- After the fake sign-in flow, the demo renders five columns and the initial sample cards.
+- After sign-in, the app renders the five-column board loaded from SQLite through FastAPI.
 - Column titles can be edited inline.
-- Cards can be added, removed, and moved within or between columns with `@dnd-kit`.
+- Cards can be added, edited, removed, and moved within or between columns with `@dnd-kit`; successful changes persist after reload.
 - The visual system uses the project colors in `src/app/globals.css`: yellow `#ecad0a`, blue `#209dd7`, purple `#753991`, navy `#032147`, and gray `#888888`.
 
 ## Commands

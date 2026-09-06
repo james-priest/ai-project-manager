@@ -31,7 +31,10 @@ describe("LoginForm", () => {
   });
 
   it("shows an error when credentials are rejected", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 401 })
+    );
     const user = userEvent.setup();
 
     render(<LoginForm onAuthenticated={vi.fn()} />);

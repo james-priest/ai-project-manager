@@ -27,4 +27,7 @@ test("logs out and blocks access until signing in again", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /sign in/i })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: /sign in/i })).toBeVisible();
+
+  const boardResponse = await page.request.get("/api/board");
+  expect(boardResponse.status()).toBe(401);
 });

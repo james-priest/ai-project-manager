@@ -41,3 +41,10 @@ The application is available at [http://127.0.0.1:3000](http://127.0.0.1:3000). 
 - Authenticated `GET /api/board` returns the five-column demo board.
 - Board mutations use the authenticated API routes under `/api/board`; changes remain after restarting the container.
 - The stop command retains the named SQLite volume. Remove it only when intentionally resetting local board data.
+
+## Part 7 persistence checks
+
+- Sign in and wait for the board to load from the backend.
+- Rename a column, add a card, edit it, remove it, and move a card between columns.
+- Reload the page after each change and confirm the latest board state remains.
+- If a request fails, confirm the visible board state is restored and an error is shown.

@@ -1,26 +1,51 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { KanbanBoard } from "@/components/KanbanBoard";
+import { initialData } from "@/lib/kanban";
 
 const getFirstColumn = () => screen.getAllByTestId(/column-/i)[0];
 
 describe("KanbanBoard", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const renderBoard = () => render(<KanbanBoard initialBoard={initialData} />);
+
   it("renders five columns", () => {
-    render(<KanbanBoard />);
+    renderBoard();
     expect(screen.getAllByTestId(/column-/i)).toHaveLength(5);
   });
 
   it("renames a column", async () => {
-    render(<KanbanBoard />);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ updated: true }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderBoard();
     const column = getFirstColumn();
     const input = within(column).getByLabelText("Column title");
     await userEvent.clear(input);
     await userEvent.type(input, "New Name");
+    await userEvent.tab();
     expect(input).toHaveValue("New Name");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
   });
 
   it("adds and removes a card", async () => {
-    render(<KanbanBoard />);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: "card-new" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ deleted: true }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    renderBoard();
     const column = getFirstColumn();
     const addButton = within(column).getByRole("button", {
       name: /add a card/i,
@@ -34,13 +59,55 @@ describe("KanbanBoard", () => {
 
     await userEvent.click(within(column).getByRole("button", { name: /add card/i }));
 
-    expect(within(column).getByText("New card")).toBeInTheDocument();
+    expect(await within(column).findByText("New card")).toBeInTheDocument();
 
     const deleteButton = within(column).getByRole("button", {
       name: /delete new card/i,
     });
     await userEvent.click(deleteButton);
 
-    expect(within(column).queryByText("New card")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(column).queryByText("New card")).not.toBeInTheDocument()
+    );
+  });
+
+  it("edits a card through the board API", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ updated: true }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderBoard();
+
+    const card = screen.getByTestId("card-card-1");
+    await userEvent.click(within(card).getByRole("button", { name: /edit/i }));
+    const titleInput = within(card).getByLabelText(
+      "Title for Align roadmap themes"
+    );
+    await userEvent.clear(titleInput);
+    await userEvent.type(titleInput, "Updated roadmap");
+    await userEvent.click(within(card).getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(within(card).getByText("Updated roadmap")).toBeInTheDocument()
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/board/cards/card-1",
+      expect.objectContaining({ method: "PATCH" })
+    );
+  });
+
+  it("restores a card when a delete fails", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("offline"));
+    vi.stubGlobal("fetch", fetchMock);
+    renderBoard();
+
+    const card = screen.getByTestId("card-card-1");
+    await userEvent.click(within(card).getByRole("button", { name: /delete/i }));
+
+    expect(await screen.findByText("Align roadmap themes")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Unable to remove card. Please try again."
+    );
   });
 });
