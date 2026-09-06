@@ -7,7 +7,7 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-  closestCorners,
+  pointerWithin,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
@@ -306,7 +306,7 @@ export const KanbanBoard = ({
 
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCorners}
+          collisionDetection={pointerWithin}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >

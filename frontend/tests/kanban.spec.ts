@@ -210,3 +210,42 @@ test("moves a card to the last position of another column", async ({ page }) => 
     expect(cleanupResponse.ok()).toBeTruthy();
   }
 });
+
+test("moves a card into an empty column", async ({ page }) => {
+  await signIn(page);
+
+  const emptyColumnResponse = await page.request.post(
+    "/api/board/cards/card-6/move",
+    { data: { target_column_id: "col-backlog", position: 0 } }
+  );
+  expect(emptyColumnResponse.ok()).toBeTruthy();
+  const resetCardResponse = await page.request.post(
+    "/api/board/cards/card-1/move",
+    { data: { target_column_id: "col-backlog", position: 0 } }
+  );
+  expect(resetCardResponse.ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+
+  try {
+    const targetColumn = page.getByTestId("column-col-review");
+    await expect(targetColumn.getByText("Drop a card here")).toBeVisible();
+    await dragCardToColumn(page, "card-1", "col-review");
+    await expect(targetColumn.getByTestId("card-card-1")).toBeVisible();
+    await page.reload();
+    await expect(
+      page.getByTestId("column-col-review").getByTestId("card-card-1")
+    ).toBeVisible();
+  } finally {
+    const restoreCardResponse = await page.request.post(
+      "/api/board/cards/card-1/move",
+      { data: { target_column_id: "col-backlog", position: 0 } }
+    );
+    expect(restoreCardResponse.ok()).toBeTruthy();
+    const restoreEmptyColumnResponse = await page.request.post(
+      "/api/board/cards/card-6/move",
+      { data: { target_column_id: "col-review", position: 0 } }
+    );
+    expect(restoreEmptyColumnResponse.ok()).toBeTruthy();
+  }
+});
