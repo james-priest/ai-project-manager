@@ -1,6 +1,6 @@
 # Project Management MVP implementation plan
 
-Status: Part 5 schema proposal is ready for sign-off. Part 6 awaits approval.
+Status: Parts 1 through 6 are complete. Part 7 is next.
 
 ## Agreed constraints and decisions
 
@@ -123,7 +123,7 @@ Success criteria:
 - [x] Save the proposal as `docs/database-schema.json`.
 - [x] Add a short explanation in `docs/` covering why the relational storage and board JSON shape are separate concerns.
 - [x] Include seed data for the single MVP user and the existing demo board without duplicating cards within a column.
-- [ ] Obtain user sign-off on the schema before implementing persistent board access.
+- [x] Obtain user sign-off on the schema before implementing persistent board access.
 
 Tests:
 
@@ -138,15 +138,15 @@ Success criteria:
 
 ## Part 6: Persistent backend board API
 
-- [ ] Initialize SQLite on application startup or first use, creating all required tables if absent.
-- [ ] Seed the MVP user and its initial board only when the database is new or the records are absent.
-- [ ] Add a small repository/service layer using the simplest appropriate SQLite access pattern.
-- [ ] Add authenticated routes to read the current user's board.
-- [ ] Add routes to rename columns, create cards, edit cards, remove cards, and move cards to a target column/position.
-- [ ] Validate ownership, IDs, required fields, column membership, and card ordering on every mutation.
-- [ ] Use transactions for mutations so a failed operation cannot leave columns and cards inconsistent.
-- [ ] Return stable JSON matching the canonical board representation.
-- [ ] Return consistent 4xx responses for authentication, validation, and missing-resource errors.
+- [x] Initialize SQLite on application startup or first use, creating all required tables if absent.
+- [x] Seed the MVP user and its initial board only when the database is new or the records are absent.
+- [x] Add a small repository/service layer using the simplest appropriate SQLite access pattern.
+- [x] Add authenticated routes to read the current user's board.
+- [x] Add routes to rename columns, create cards, edit cards, remove cards, and move cards to a target column/position.
+- [x] Validate ownership, IDs, required fields, column membership, and card ordering on every mutation.
+- [x] Use transactions for mutations so a failed operation cannot leave columns and cards inconsistent.
+- [x] Return stable JSON matching the canonical board representation.
+- [x] Return consistent 4xx responses for authentication, validation, and missing-resource errors.
 
 Tests:
 

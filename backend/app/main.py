@@ -1,12 +1,23 @@
 import os
 import secrets
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import AsyncIterator
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+from .database import BoardRepository, get_database_path, initialize_database
+from .schemas import (
+    BoardData,
+    CreateCardRequest,
+    MoveCardRequest,
+    RenameColumnRequest,
+    UpdateCardRequest,
+)
 
 PLACEHOLDER_STATIC_DIR = Path(__file__).resolve().parents[1] / "static"
 EXPORTED_STATIC_DIR = Path(os.getenv("FRONTEND_STATIC_DIR", "/app/frontend-out"))
@@ -26,7 +37,14 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
-app = FastAPI(title="Project Management MVP")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    initialize_database(get_database_path())
+    yield
+
+
+app = FastAPI(title="Project Management MVP", lifespan=lifespan)
 
 
 def create_session() -> str:
@@ -97,6 +115,89 @@ def logout(request: Request, response: Response) -> dict[str, bool]:
 @app.get("/api/example")
 def example(_: str = Depends(get_current_user)) -> dict[str, str]:
     return {"message": "hello world"}
+
+
+def get_board_repository() -> BoardRepository:
+    return BoardRepository(get_database_path())
+
+
+@app.get("/api/board", response_model=BoardData)
+def read_board(
+    username: str = Depends(get_current_user),
+) -> BoardData:
+    board = get_board_repository().get_board(username)
+    if board is None:
+        raise HTTPException(status_code=404, detail="Board not found")
+    return board
+
+
+@app.patch("/api/board/columns/{column_id}")
+def rename_column(
+    column_id: str,
+    request: RenameColumnRequest,
+    username: str = Depends(get_current_user),
+) -> dict[str, bool]:
+    updated = get_board_repository().rename_column(
+        username, column_id, request.title
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Column not found")
+    return {"updated": True}
+
+
+@app.post("/api/board/cards", status_code=201)
+def create_card(
+    request: CreateCardRequest,
+    username: str = Depends(get_current_user),
+) -> dict[str, str]:
+    card_id = get_board_repository().create_card(
+        username, request.column_id, request.title, request.details
+    )
+    if card_id is None:
+        raise HTTPException(status_code=404, detail="Column not found")
+    return {"id": card_id}
+
+
+@app.patch("/api/board/cards/{card_id}")
+def update_card(
+    card_id: str,
+    request: UpdateCardRequest,
+    username: str = Depends(get_current_user),
+) -> dict[str, bool]:
+    updated = get_board_repository().update_card(
+        username, card_id, request.title, request.details
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return {"updated": True}
+
+
+@app.delete("/api/board/cards/{card_id}")
+def delete_card(
+    card_id: str,
+    username: str = Depends(get_current_user),
+) -> dict[str, bool]:
+    deleted = get_board_repository().delete_card(username, card_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return {"deleted": True}
+
+
+@app.post("/api/board/cards/{card_id}/move")
+def move_card(
+    card_id: str,
+    request: MoveCardRequest,
+    username: str = Depends(get_current_user),
+) -> dict[str, bool]:
+    moved = get_board_repository().move_card(
+        username, card_id, request.target_column_id, request.position
+    )
+    if not moved:
+        raise HTTPException(
+            status_code=404,
+            detail="Card or target column not found",
+        )
+    return {"moved": True}
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="frontend")

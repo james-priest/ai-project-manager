@@ -1,27 +1,8 @@
 import time
 
-import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import (
-    SESSION_COOKIE,
-    SESSION_STORE,
-    app,
-    create_session,
-)
-
-
-@pytest.fixture(autouse=True)
-def clear_sessions() -> None:
-    SESSION_STORE.clear()
-    yield
-    SESSION_STORE.clear()
-
-
-@pytest.fixture
-def client() -> TestClient:
-    with TestClient(app) as test_client:
-        yield test_client
+from backend.app.main import SESSION_COOKIE, SESSION_STORE, create_session
 
 
 def login(client: TestClient) -> str:

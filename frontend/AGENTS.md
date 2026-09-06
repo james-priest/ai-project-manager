@@ -4,7 +4,7 @@
 
 This directory contains the existing Kanban Studio frontend. It is a Next.js 16 App Router application using TypeScript, React 19, Tailwind CSS 4, and `@dnd-kit` for drag and drop. `next.config.ts` is configured for a static export; production builds write the site to `out/` for FastAPI to serve.
 
-The current app is a frontend-only demo. `src/app/page.tsx` renders `KanbanBoard`, and the board is held in React state initialized from `src/lib/kanban.ts`. There is currently no authentication, backend API, persistence, or AI chat.
+The current app still holds its demo board in React state initialized from `src/lib/kanban.ts`; backend board persistence is connected in Part 7. `src/app/page.tsx` renders `AuthGate`, which checks the FastAPI session and shows the existing board after sign-in. There is no AI chat yet.
 
 ## Structure
 
@@ -18,7 +18,7 @@ The current app is a frontend-only demo. `src/app/page.tsx` renders `KanbanBoard
 
 ## Existing behavior
 
-- The demo renders five columns and the initial sample cards.
+- After the fake sign-in flow, the demo renders five columns and the initial sample cards.
 - Column titles can be edited inline.
 - Cards can be added, removed, and moved within or between columns with `@dnd-kit`.
 - The visual system uses the project colors in `src/app/globals.css`: yellow `#ecad0a`, blue `#209dd7`, purple `#753991`, navy `#032147`, and gray `#888888`.
@@ -32,6 +32,7 @@ npm run dev
 npm run build
 npm run lint
 npm run test:unit
+npm run test:coverage
 npm run test:e2e
 npm run test:all
 ```
@@ -44,5 +45,5 @@ Vitest uses jsdom, Testing Library, `user-event`, and the setup file at `src/tes
 - Keep components focused on presentation and user interaction; pass state changes through typed callbacks or a small API/data layer.
 - Use accessible labels and roles for controls so both users and browser tests can interact with the UI.
 - Preserve the existing visual language and avoid adding features outside the approved project plan.
-- Add unit/component tests for new behavior and Playwright coverage for important end-to-end journeys. Maintain at least 80% unit-test coverage once coverage thresholds are enabled.
+- Add unit/component tests for new behavior and Playwright coverage for important end-to-end journeys. The `test:coverage` command enforces at least 80% statements, branches, functions, and lines for unit-testable source.
 - Use same-origin `/api` requests when the static site is served by FastAPI.

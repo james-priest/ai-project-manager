@@ -25,7 +25,7 @@ The application is available at [http://127.0.0.1:3000](http://127.0.0.1:3000). 
 - `GET /` serves the statically exported Next.js Kanban application.
 - Next.js assets are served by FastAPI from the exported `out/` directory.
 - `GET /api/health` returns `{ "status": "ok" }`.
-- `GET /api/example` returns `{ "message": "hello world" }`.
+- Authenticated `GET /api/example` returns `{ "message": "hello world" }`.
 
 ## Part 4 authentication checks
 
@@ -35,4 +35,9 @@ The application is available at [http://127.0.0.1:3000](http://127.0.0.1:3000). 
 - Log out and reload `/`; confirm the sign-in form appears again.
 - Try an incorrect password and confirm an error is shown without revealing which credential was wrong.
 
-The SQLite volume is named `kanban-data` and is retained by the stop command for the persistence work in later parts.
+## Part 6 board API checks
+
+- The SQLite database is created and seeded automatically in the persistent `kanban-data` volume.
+- Authenticated `GET /api/board` returns the five-column demo board.
+- Board mutations use the authenticated API routes under `/api/board`; changes remain after restarting the container.
+- The stop command retains the named SQLite volume. Remove it only when intentionally resetting local board data.
