@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .ai import AIResponseError, run_ai_chat
 from .database import BoardRepository, get_database_path, initialize_database
 from .openrouter import (
     AIProvider,
@@ -20,6 +21,8 @@ from .openrouter import (
     OpenRouterTimeoutError,
 )
 from .schemas import (
+    AIChatRequest,
+    AIChatResponse,
     AIConnectivityResponse,
     BoardData,
     CreateCardRequest,
@@ -150,6 +153,33 @@ def ai_connectivity(
         raise HTTPException(status_code=502, detail=str(error)) from error
 
     return AIConnectivityResponse(prompt=CONNECTIVITY_PROMPT, response=response)
+
+
+@app.post("/api/ai/chat", response_model=AIChatResponse)
+def ai_chat(
+    request: AIChatRequest,
+    username: str = Depends(get_current_user),
+    provider: AIProvider = Depends(get_ai_provider),
+) -> AIChatResponse:
+    try:
+        return run_ai_chat(
+            provider,
+            get_board_repository(),
+            username,
+            request,
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail="Board not found") from error
+    except OpenRouterConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except OpenRouterTimeoutError as error:
+        raise HTTPException(status_code=504, detail=str(error)) from error
+    except OpenRouterProviderError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except OpenRouterError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except AIResponseError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 def get_board_repository() -> BoardRepository:

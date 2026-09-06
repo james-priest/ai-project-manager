@@ -62,3 +62,18 @@ source .env
 set +a
 RUN_LIVE_OPENROUTER_TESTS=1 uv run --project backend pytest backend/tests/test_openrouter.py -k live
 ```
+
+## Part 9 structured AI chat check
+
+- Sign in before calling the protected `POST /api/ai/chat` route.
+- Send a question and, optionally, request-scoped conversation history. The response includes the assistant text, an `updated` flag, and the resulting board.
+- The backend rejects malformed or unauthorized model operations and leaves the board unchanged.
+
+Example request body:
+
+```json
+{
+  "question": "Move the roadmap themes card to review.",
+  "history": []
+}
+```

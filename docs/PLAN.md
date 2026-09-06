@@ -1,6 +1,6 @@
 # Project Management MVP implementation plan
 
-Status: Parts 1 through 8 are complete. Part 9 is next.
+Status: Parts 1 through 9 are complete. Part 10 is next.
 
 ## Agreed constraints and decisions
 
@@ -11,6 +11,9 @@ Status: Parts 1 through 8 are complete. Part 9 is next.
 - The MVP login is `user` / `password`; the data model supports multiple users.
 - Authentication uses a server-side session identifier in an HTTP-only cookie. The MVP may use an in-process session store because it runs as one local container; board data remains persistent in SQLite.
 - OpenRouter is used with model `openai/gpt-oss-120b` and `OPENROUTER_API_KEY` from the project root `.env`.
+- AI chat responses are strict JSON containing user-facing text and ordered create, edit, and move operations; column renaming is not part of the AI operation scope.
+- AI-generated card positions are zero-based and must be within the target column's current bounds; invalid positions are rejected rather than clamped.
+- A valid batch of AI board operations is simulated and committed in one SQLite transaction. Conversation history is sent with each request but is not persisted.
 - The existing frontend test setup remains the default: Vitest, Testing Library, and Playwright.
 - Unit tests must maintain at least 80% coverage. Coverage should be enforced for statements, branches, functions, and lines across unit-testable application code.
 - Integration testing must cover frontend/backend behavior and the main user journeys, not only isolated components.
@@ -209,29 +212,29 @@ Success criteria:
 
 ## Part 9: Structured AI board operations
 
-- [ ] Define typed request/response models for the user's question, conversation history, current board JSON, assistant response, and optional board update.
-- [ ] Send the current authenticated user's complete board JSON, the user's question, and conversation history to the model on every chat request.
-- [ ] Define structured operations for creating, editing, and moving one or more cards; include optional column rename only if required by the approved product scope.
-- [ ] Require the model response to contain user-facing text and either no update or a validated update operation list.
-- [ ] Validate every model-generated ID, column, position, title, and details field on the server.
-- [ ] Apply multiple valid operations atomically against the authenticated user's board.
-- [ ] Reject malformed or unauthorized operations without partially applying them.
-- [ ] Return the assistant response and the resulting board (or a signal that no board change occurred) to the frontend.
-- [ ] Keep conversation history request-scoped for the MVP; do not add chat-history persistence unless separately approved.
+- [x] Define typed request/response models for the user's question, conversation history, current board JSON, assistant response, and optional board update.
+- [x] Send the current authenticated user's complete board JSON, the user's question, and conversation history to the model on every chat request.
+- [x] Define structured operations for creating, editing, and moving one or more cards; keep column renaming out of the MVP AI operation scope.
+- [x] Require the model response to contain user-facing text and either no update or a validated update operation list.
+- [x] Validate every model-generated ID, column, position, title, and details field on the server.
+- [x] Apply multiple valid operations atomically against the authenticated user's board.
+- [x] Reject malformed or unauthorized operations without partially applying them.
+- [x] Return the assistant response and the resulting board (or a signal that no board change occurred) to the frontend.
+- [x] Keep conversation history request-scoped for the MVP; do not add chat-history persistence unless separately approved.
 
 Tests:
 
-- Unit tests for structured-output parsing, operation validation, operation ordering, and atomic rollback.
-- Provider-mocked integration tests proving the prompt includes the current board, question, and history.
-- Tests for create, edit, and move operations singly and in combination.
-- Tests for malformed JSON, unknown IDs, invalid columns/positions, duplicate operations, and provider refusal/error responses.
-- Security tests proving model output cannot escape the authenticated user's board.
+- [x] Unit tests for structured-output parsing, operation validation, operation ordering, and atomic rollback.
+- [x] Provider-mocked integration tests proving the prompt includes the current board, question, and history.
+- [x] Tests for create, edit, and move operations singly and in combination.
+- [x] Tests for malformed JSON, unknown IDs, invalid columns/positions, duplicate operations, and provider refusal/error responses.
+- [x] Security tests proving model output cannot escape the authenticated user's board.
 
 Success criteria:
 
-- Each chat request includes the required board and conversation context.
-- The backend can safely apply zero, one, or multiple model-requested card operations.
-- Invalid model output never corrupts persisted board data.
+- [x] Each chat request includes the required board and conversation context.
+- [x] The backend can safely apply zero, one, or multiple model-requested card operations.
+- [x] Invalid model output never corrupts persisted board data.
 
 ## Part 10: AI chat sidebar
 

@@ -5,7 +5,14 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .schemas import BoardData
+from .schemas import (
+    BoardData,
+    BoardOperation,
+    CardData,
+    CreateCardOperation,
+    EditCardOperation,
+    MoveCardOperation,
+)
 
 DEFAULT_DATABASE_PATH = Path(__file__).resolve().parents[1] / "data" / "kanban.db"
 
@@ -201,6 +208,10 @@ def seed_initial_data(connection: sqlite3.Connection) -> None:
     )
 
 
+class BoardOperationError(ValueError):
+    """Raised when a batch contains an invalid board operation."""
+
+
 class BoardRepository:
     def __init__(self, database_path: Path | None = None) -> None:
         self.database_path = database_path or get_database_path()
@@ -214,25 +225,124 @@ class BoardRepository:
             if board is None:
                 return None
 
-            columns = connection.execute(
-                """
-                SELECT id, title
-                FROM columns
-                WHERE board_id = ?
-                ORDER BY position
-                """,
-                (board["id"],),
-            ).fetchall()
-            cards = connection.execute(
-                """
-                SELECT cards.id, cards.column_id, cards.title, cards.details
-                FROM cards
-                JOIN columns ON columns.id = cards.column_id
-                WHERE columns.board_id = ?
-                ORDER BY columns.position, cards.position
-                """,
-                (board["id"],),
-            ).fetchall()
+            return self._board_data(connection, board)
+
+    def apply_operations(
+        self,
+        username: str,
+        operations: list[BoardOperation],
+    ) -> BoardData | None:
+        with connect(self.database_path) as connection:
+            board = self._get_board(connection, username)
+            if board is None:
+                return None
+
+            current_board = self._board_data(connection, board)
+            if not operations:
+                return current_board
+
+            column_card_ids = {
+                column.id: list(column.cardIds)
+                for column in current_board.columns
+            }
+            cards = dict(current_board.cards)
+            created_card_ids: list[str] = []
+
+            for operation in operations:
+                if isinstance(operation, CreateCardOperation):
+                    if operation.column_id not in column_card_ids:
+                        raise BoardOperationError("Column not found")
+                    card_ids = column_card_ids[operation.column_id]
+                    if operation.position > len(card_ids):
+                        raise BoardOperationError("Invalid card position")
+
+                    card_id = f"card-{secrets.token_hex(8)}"
+                    card_ids.insert(operation.position, card_id)
+                    cards[card_id] = CardData(
+                        id=card_id,
+                        title=operation.title,
+                        details=operation.details,
+                    )
+                    created_card_ids.append(card_id)
+                    continue
+
+                if isinstance(operation, EditCardOperation):
+                    if operation.card_id not in cards:
+                        raise BoardOperationError("Card not found")
+                    existing_card = cards[operation.card_id]
+                    cards[operation.card_id] = CardData(
+                        id=existing_card.id,
+                        title=operation.title,
+                        details=operation.details,
+                    )
+                    continue
+
+                if isinstance(operation, MoveCardOperation):
+                    if operation.target_column_id not in column_card_ids:
+                        raise BoardOperationError("Column not found")
+
+                    source_column_id = next(
+                        (
+                            column_id
+                            for column_id, card_ids in column_card_ids.items()
+                            if operation.card_id in card_ids
+                        ),
+                        None,
+                    )
+                    if source_column_id is None:
+                        raise BoardOperationError("Card not found")
+
+                    source_card_ids = column_card_ids[source_column_id]
+                    source_card_ids.remove(operation.card_id)
+                    target_card_ids = (
+                        source_card_ids
+                        if source_column_id == operation.target_column_id
+                        else column_card_ids[operation.target_column_id]
+                    )
+                    if operation.position > len(target_card_ids):
+                        raise BoardOperationError("Invalid card position")
+                    target_card_ids.insert(operation.position, operation.card_id)
+                    continue
+
+                raise BoardOperationError("Unsupported board operation")
+
+            self._persist_board_state(
+                connection,
+                board["id"],
+                current_board,
+                column_card_ids,
+                cards,
+                created_card_ids,
+            )
+
+        updated_board = self.get_board(username)
+        if updated_board is None:
+            raise BoardOperationError("Board not found")
+        return updated_board
+
+    @staticmethod
+    def _board_data(
+        connection: sqlite3.Connection, board: sqlite3.Row
+    ) -> BoardData:
+        columns = connection.execute(
+            """
+            SELECT id, title
+            FROM columns
+            WHERE board_id = ?
+            ORDER BY position
+            """,
+            (board["id"],),
+        ).fetchall()
+        cards = connection.execute(
+            """
+            SELECT cards.id, cards.column_id, cards.title, cards.details
+            FROM cards
+            JOIN columns ON columns.id = cards.column_id
+            WHERE columns.board_id = ?
+            ORDER BY columns.position, cards.position
+            """,
+            (board["id"],),
+        ).fetchall()
 
         card_ids_by_column = {column["id"]: [] for column in columns}
         card_data = {}
@@ -255,6 +365,70 @@ class BoardRepository:
             ],
             cards=card_data,
         )
+
+    @staticmethod
+    def _persist_board_state(
+        connection: sqlite3.Connection,
+        board_id: str,
+        current_board: BoardData,
+        column_card_ids: dict[str, list[str]],
+        cards: dict[str, CardData],
+        created_card_ids: list[str],
+    ) -> None:
+        column_ids = {column.id for column in current_board.columns}
+        BoardRepository._offset_card_positions(connection, column_ids)
+        temporary_position = connection.execute(
+            """
+            SELECT COALESCE(MAX(position), 0) + 1
+            FROM cards
+            WHERE column_id IN ({placeholders})
+            """.format(placeholders=", ".join("?" for _ in column_ids)),
+            tuple(column_ids),
+        ).fetchone()[0]
+
+        for card_id in created_card_ids:
+            card = cards[card_id]
+            column_id = next(
+                column_id
+                for column_id, card_ids in column_card_ids.items()
+                if card_id in card_ids
+            )
+            connection.execute(
+                """
+                INSERT INTO cards (id, column_id, title, details, position)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    card.id,
+                    column_id,
+                    card.title,
+                    card.details,
+                    temporary_position,
+                ),
+            )
+            temporary_position += 1
+
+        for column_id, card_ids in column_card_ids.items():
+            for position, card_id in enumerate(card_ids):
+                card = cards[card_id]
+                connection.execute(
+                    """
+                    UPDATE cards
+                    SET column_id = ?, title = ?, details = ?, position = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        column_id,
+                        card.title,
+                        card.details,
+                        position,
+                        utc_now(),
+                        card_id,
+                    ),
+                )
+
+        BoardRepository._touch_board(connection, board_id)
 
     def rename_column(self, username: str, column_id: str, title: str) -> bool:
         with connect(self.database_path) as connection:
