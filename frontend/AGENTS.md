@@ -4,12 +4,13 @@
 
 This directory contains the existing Kanban Studio frontend. It is a Next.js 16 App Router application using TypeScript, React 19, Tailwind CSS 4, and `@dnd-kit` for drag and drop. `next.config.ts` is configured for a static export; production builds write the site to `out/` for FastAPI to serve.
 
-The current app loads the authenticated board from FastAPI and keeps the working board state in `KanbanBoard` while mutations are persisted through `src/lib/api.ts`. `src/app/page.tsx` renders `AuthGate`, which checks the FastAPI session, loads the board, and shows clear loading/error states. There is no AI chat yet.
+The current app loads the authenticated board from FastAPI and keeps the working board state in `KanbanBoard` while mutations are persisted through `src/lib/api.ts`. `src/app/page.tsx` renders `AuthGate`, which checks the FastAPI session, loads the board, and shows clear loading/error states. `AIChatSidebar` sends request-scoped conversation history to the structured AI endpoint and applies returned board updates through `KanbanBoard`.
 
 ## Structure
 
 - `src/app/`: Next.js layout, page, global styles, and favicon.
 - `src/components/`: board, column, card, drag preview, and new-card form components.
+- `src/components/AIChatSidebar.tsx`: accessible AI conversation UI and structured board-refresh handling.
 - `src/lib/kanban.ts`: `Card`, `Column`, and `BoardData` types, demo data, card movement, and ID creation.
 - `src/lib/api.ts`: typed same-origin auth and board API client.
 - `src/test/`: Vitest setup and type declarations.
@@ -22,6 +23,7 @@ The current app loads the authenticated board from FastAPI and keeps the working
 - After sign-in, the app renders the five-column board loaded from SQLite through FastAPI.
 - Column titles can be edited inline.
 - Cards can be added, edited, removed, and moved within or between columns with `@dnd-kit`; successful changes persist after reload.
+- The AI sidebar renders request-scoped user/assistant messages, submits questions with prior history, and refreshes the board when the backend returns `updated: true`.
 - The visual system uses the project colors in `src/app/globals.css`: yellow `#ecad0a`, blue `#209dd7`, purple `#753991`, navy `#032147`, and gray `#888888`.
 
 ## Commands

@@ -9,6 +9,17 @@ export type CardMutationResponse = {
   id: string;
 };
 
+export type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type AIChatResponse = {
+  response: string;
+  board: BoardData;
+  updated: boolean;
+};
+
 export class ApiError extends Error {
   status: number;
 
@@ -96,6 +107,13 @@ export const api = {
     jsonRequest<{ moved: true }>(
       `/api/board/cards/${encodeURIComponent(cardId)}/move`,
       { target_column_id: targetColumnId, position },
+      "POST"
+    ),
+
+  chat: (question: string, history: ChatMessage[]) =>
+    jsonRequest<AIChatResponse>(
+      "/api/ai/chat",
+      { question, history },
       "POST"
     ),
 };

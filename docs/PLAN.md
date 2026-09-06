@@ -1,6 +1,6 @@
 # Project Management MVP implementation plan
 
-Status: Parts 1 through 9 are complete. Part 10 is next.
+Status: Parts 1 through 10 are complete.
 
 ## Agreed constraints and decisions
 
@@ -238,26 +238,26 @@ Success criteria:
 
 ## Part 10: AI chat sidebar
 
-- [ ] Add an accessible, responsive sidebar widget to the authenticated board view.
-- [ ] Render conversation history, user messages, assistant responses, and provider/application errors.
-- [ ] Add an input and submit action with disabled/loading behavior while a request is in flight.
-- [ ] Send the current question and conversation history to the structured AI endpoint.
-- [ ] Display the assistant response and automatically refresh the board when the response includes an update.
-- [ ] Preserve the board's drag-and-drop, editing, and card creation behavior while the sidebar is open.
-- [ ] Match the existing color scheme, typography, spacing, and visual style.
-- [ ] Ensure keyboard navigation, labels, focus states, and mobile layout are usable.
+- [x] Add an accessible, responsive sidebar widget to the authenticated board view.
+- [x] Render conversation history, user messages, assistant responses, and provider/application errors.
+- [x] Add an input and submit action with disabled/loading behavior while a request is in flight.
+- [x] Send the current question and conversation history to the structured AI endpoint.
+- [x] Display the assistant response and automatically refresh the board when the response includes an update.
+- [x] Preserve the board's drag-and-drop, editing, and card creation behavior while the sidebar is open.
+- [x] Match the existing color scheme, typography, spacing, and visual style.
+- [x] Ensure keyboard navigation, labels, focus states, and mobile layout are usable.
 
 Tests:
 
-- Unit/component tests for rendering, submitting, loading, errors, history, keyboard behavior, and board-refresh triggering.
-- Integration tests with mocked structured responses for no-op, single-card, and multi-card updates.
-- Playwright journey: ask the assistant to create, edit, and move cards; verify the response, refreshed board, persisted result, and continued manual board interaction.
-- Playwright failure tests for unavailable AI and malformed server responses.
-- Run the complete unit, backend integration, frontend integration, and browser suites with coverage reporting.
+- [x] Unit/component tests for rendering, submitting, loading, errors, history, keyboard behavior, and board-refresh triggering.
+- [x] Integration tests with mocked structured responses for no-op, single-card, and multi-card updates.
+- [x] Playwright journey: ask the assistant to create, edit, and move cards; verify the response, refreshed board, persisted result, and continued manual board interaction.
+- [x] Playwright failure tests for unavailable AI and malformed server responses.
+- [x] Run the complete unit, backend integration, frontend integration, and browser suites with coverage reporting.
 
 Success criteria:
 
-- A signed-in user can use the sidebar to ask questions and see responses.
-- The AI can create, edit, and move one or more cards through validated structured output.
-- AI-triggered board changes appear automatically and remain persisted after reload.
-- The complete test suite passes and unit coverage remains at or above 80%.
+- [x] A signed-in user can use the sidebar to ask questions and see responses.
+- [x] The AI can create, edit, and move one or more cards through validated structured output.
+- [x] AI-triggered board changes appear automatically and remain persisted after reload.
+- [x] The complete test suite passes and unit coverage remains at or above 80%.

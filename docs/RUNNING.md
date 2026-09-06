@@ -77,3 +77,11 @@ Example request body:
   "history": []
 }
 ```
+
+## Part 10 sidebar check
+
+- Sign in and confirm the `Ask the board` sidebar appears beside the board on wide screens and below it on narrow screens.
+- Enter a question and press `Send message`, or press Enter. Use Shift+Enter for a multiline question.
+- Confirm user and assistant messages appear in the conversation and that the send controls are disabled while the request is running.
+- When the assistant changes cards, confirm the board updates without a page reload and remains changed after reloading.
+- If the AI request fails, confirm an application error appears and the existing board remains usable.

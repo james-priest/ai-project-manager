@@ -1,4 +1,5 @@
 import { api, ApiError, getApiErrorMessage } from "@/lib/api";
+import { initialData } from "@/lib/kanban";
 
 describe("api client", () => {
   afterEach(() => {
@@ -120,5 +121,36 @@ describe("api client", () => {
       "Bad request"
     );
     expect(getApiErrorMessage(new Error("offline"), "Fallback")).toBe("Fallback");
+  });
+
+  it("sends the chat question and request-scoped history", async () => {
+    const chatResponse = {
+      response: "I found one priority.",
+      board: initialData,
+      updated: false,
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => chatResponse,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const history = [
+      { role: "user" as const, content: "Summarize the board." },
+      { role: "assistant" as const, content: "Review is next." },
+    ];
+    await expect(api.chat("What should we prioritize?", history)).resolves.toEqual(
+      chatResponse
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question: "What should we prioritize?",
+        history,
+      }),
+      credentials: "same-origin",
+    });
   });
 });
