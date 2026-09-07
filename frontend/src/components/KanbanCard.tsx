@@ -122,33 +122,60 @@ export const KanbanCard = ({ card, onEdit, onDelete }: KanbanCardProps) => {
         </form>
       ) : (
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <h4 className="font-display text-base font-semibold text-[var(--navy-dark)]">
-              {card.title}
-            </h4>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start gap-2">
+              <h4 className="min-w-0 flex-1 break-words font-display text-base font-semibold text-[var(--navy-dark)]">
+                {card.title}
+              </h4>
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={startEditing}
+                  className="flex h-7 w-7 items-center justify-center rounded-full border border-transparent text-[var(--gray-text)] transition hover:border-[var(--stroke)] hover:text-[var(--navy-dark)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-blue)]"
+                  aria-label={`Edit ${card.title}`}
+                  title={`Edit ${card.title}`}
+                >
+                  <svg
+                    aria-hidden="true"
+                    className="h-4 w-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="m4 16.5-.75 4.25 4.25-.75L19 8.5 15.5 5z" />
+                    <path d="m13.75 6.75 3.5 3.5M3.25 20.75l3.5-3.5" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={() => void onDelete(card.id)}
+                  className="flex h-7 w-7 items-center justify-center rounded-full border border-transparent text-[var(--gray-text)] transition hover:border-[var(--stroke)] hover:text-[var(--navy-dark)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-blue)]"
+                  aria-label={`Delete ${card.title}`}
+                  title={`Delete ${card.title}`}
+                >
+                  <svg
+                    aria-hidden="true"
+                    className="h-4 w-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M4.5 7.5h15M9 4.5h6l1 3H8zM7 7.5l.75 12h8.5L17 7.5M10 11v5M14 11v5" />
+                  </svg>
+                </button>
+              </div>
+            </div>
             <p className="mt-2 text-sm leading-6 text-[var(--gray-text)]">
               {card.details}
             </p>
-          </div>
-          <div className="flex flex-col items-end gap-1">
-            <button
-              type="button"
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={startEditing}
-              className="rounded-full border border-transparent px-2 py-1 text-xs font-semibold text-[var(--gray-text)] transition hover:border-[var(--stroke)] hover:text-[var(--navy-dark)]"
-              aria-label={`Edit ${card.title}`}
-            >
-              Edit
-            </button>
-            <button
-              type="button"
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={() => void onDelete(card.id)}
-              className="rounded-full border border-transparent px-2 py-1 text-xs font-semibold text-[var(--gray-text)] transition hover:border-[var(--stroke)] hover:text-[var(--navy-dark)]"
-              aria-label={`Delete ${card.title}`}
-            >
-              Remove
-            </button>
           </div>
         </div>
       )}

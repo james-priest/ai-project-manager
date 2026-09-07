@@ -17,6 +17,24 @@ describe("KanbanBoard", () => {
     expect(screen.getAllByTestId(/column-/i)).toHaveLength(5);
   });
 
+  it("renders compact accessible card action icons beside the title", () => {
+    renderBoard();
+
+    const card = screen.getByTestId("card-card-1");
+    const editButton = within(card).getByRole("button", {
+      name: "Edit Align roadmap themes",
+    });
+    const deleteButton = within(card).getByRole("button", {
+      name: "Delete Align roadmap themes",
+    });
+
+    expect(editButton).toHaveAttribute("title", "Edit Align roadmap themes");
+    expect(deleteButton).toHaveAttribute("title", "Delete Align roadmap themes");
+    expect(editButton.querySelector("svg")).toBeInTheDocument();
+    expect(deleteButton.querySelector("svg")).toBeInTheDocument();
+    expect(within(card).queryByText("Remove")).not.toBeInTheDocument();
+  });
+
   it("renames a column", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
