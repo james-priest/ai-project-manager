@@ -1,6 +1,6 @@
 # Project Management MVP implementation plan
 
-Status: Parts 1 through 10 are complete.
+Status: Parts 1 through 11 are complete.
 
 ## Agreed constraints and decisions
 
@@ -261,3 +261,44 @@ Success criteria:
 - [x] The AI can create, edit, and move one or more cards through validated structured output.
 - [x] AI-triggered board changes appear automatically and remain persisted after reload.
 - [x] The complete test suite passes and unit coverage remains at or above 80%.
+
+## Part 11: Floating draggable AI assistant
+
+Interaction decisions:
+
+- Restore the Kanban board to the full available content width; the assistant must not reserve a board grid column or change the board's normal document flow.
+- Keep a clearly labeled assistant launcher fixed in the lower-right corner of the viewport when the assistant is closed.
+- Open the assistant as a floating dialog fixed to the lower-right of the same viewport, above the board on its own z-index layer. Do not add a full-screen backdrop so the board remains visible while the assistant is open.
+- Make the dialog draggable by its header and resizable from a dedicated resize handle. Keep its position and dimensions clamped inside the viewport with usable minimum and maximum sizes.
+- Keep the current dialog position and size while it is open or temporarily closed, but do not persist geometry across page reloads. The conversation remains request-scoped as established in Part 9.
+- On narrow viewports, constrain the dialog to the viewport with consistent margins; board content must continue to scroll vertically behind or alongside it without moving the fixed dialog.
+
+Implementation steps:
+
+- [x] Remove the assistant from the board's layout grid and return the board columns to their existing full-width responsive layout.
+- [x] Split the current assistant presentation into a fixed launcher and an independently positioned dialog layer without changing the existing chat API contract or board-update callback.
+- [x] Add open/close state, initial lower-right geometry, drag state, resize state, and viewport-bound clamping in a small testable UI state/helper module.
+- [x] Implement pointer-based dragging from the dialog header with pointer capture, preventing text selection and preserving normal input/button behavior inside the dialog.
+- [x] Implement pointer-based resizing with minimum dimensions, viewport maximums, and geometry correction when the viewport changes size.
+- [x] Add the fixed positioning and z-index styling while preserving the existing project colors, typography, spacing, and responsive behavior.
+- [x] Add dialog accessibility: an accessible launcher label, `role="dialog"`, a labelled dialog heading, close control, focus placement on open, focus restoration on close, Escape-to-close, and usable keyboard access to all chat controls.
+- [x] Verify that board drag-and-drop, card editing, card creation, and page vertical scrolling remain usable while the assistant is open.
+- [x] Update frontend documentation and the running instructions for the floating assistant behavior.
+
+Tests:
+
+- [x] Unit tests for initial geometry, drag calculations, resize calculations, viewport clamping, minimum/maximum dimensions, and viewport-resize correction.
+- [x] Component tests for launcher visibility, open/close behavior, dialog semantics, focus placement/restoration, Escape-to-close, chat submission, loading/errors, and board refresh behavior.
+- [x] Component tests proving the assistant no longer changes the board layout when opened or closed.
+- [x] Playwright tests for opening the lower-right dialog, dragging it, resizing it, and keeping it within the viewport.
+- [x] Playwright test that scrolls a board whose columns extend below the fold and verifies the fixed assistant remains in the same viewport position.
+- [x] Playwright regression journey covering manual board interaction while the floating assistant is open and AI-triggered board updates followed by reload persistence.
+- [x] Run the complete unit, coverage, backend integration, frontend integration, and browser suites.
+
+Success criteria:
+
+- [x] The closed assistant is represented by a fixed lower-right launcher and does not consume board layout space.
+- [x] The open assistant remains fixed to the viewport while the page scrolls and renders above the board on a separate layer.
+- [x] Users can drag and resize the assistant without allowing it to leave the viewport or become unusably small or large.
+- [x] The existing AI conversation and board-update behavior continues to work, and manual board interactions remain usable.
+- [x] Accessibility behavior and the complete test suite pass while unit coverage remains at or above 80%.

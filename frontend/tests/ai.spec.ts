@@ -14,6 +14,11 @@ const getBoard = async (page: Page) => {
   return response.json();
 };
 
+const openAssistant = async (page: Page) => {
+  await page.getByRole("button", { name: "Open workspace assistant" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+};
+
 test("asks the assistant and renders a no-op response", async ({ page }) => {
   await signIn(page);
   const board = await getBoard(page);
@@ -33,6 +38,7 @@ test("asks the assistant and renders a no-op response", async ({ page }) => {
     });
   });
 
+  await openAssistant(page);
   const sidebar = page.getByTestId("ai-chat-sidebar");
   await expect(sidebar).toBeVisible();
   await sidebar
@@ -102,6 +108,7 @@ test("applies assistant create, edit, and move changes and keeps them after relo
   });
 
   try {
+    await openAssistant(page);
     const sidebar = page.getByTestId("ai-chat-sidebar");
     await sidebar
       .getByRole("textbox", { name: "Your question" })
@@ -160,9 +167,73 @@ test("shows an application error when the assistant is unavailable", async ({
     });
   });
 
+  await openAssistant(page);
   const sidebar = page.getByTestId("ai-chat-sidebar");
   await sidebar.getByRole("textbox", { name: "Your question" }).fill("Can you help?");
   await sidebar.getByRole("button", { name: "Send message" }).click();
 
   await expect(sidebar.getByRole("alert")).toHaveText("AI service is unavailable.");
+});
+
+test("keeps the assistant fixed while scrolling and supports drag and resize", async ({
+  page,
+}) => {
+  await signIn(page);
+  await openAssistant(page);
+
+  const dialog = page.getByRole("dialog");
+  const initialBox = await dialog.boundingBox();
+  if (!initialBox) {
+    throw new Error("Unable to resolve assistant position.");
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeGreaterThan(
+    await page.evaluate(() => window.innerHeight)
+  );
+
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  const scrolledBox = await dialog.boundingBox();
+  if (!scrolledBox) {
+    throw new Error("Unable to resolve assistant position after scrolling.");
+  }
+  expect(scrolledBox.x).toBeCloseTo(initialBox.x, 0);
+  expect(scrolledBox.y).toBeCloseTo(initialBox.y, 0);
+
+  const dragHandle = page.getByTestId("ai-chat-drag-handle");
+  const dragBox = await dragHandle.boundingBox();
+  if (!dragBox) {
+    throw new Error("Unable to resolve assistant drag handle.");
+  }
+  await page.mouse.move(dragBox.x + dragBox.width / 2, dragBox.y + dragBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(dragBox.x - 80, dragBox.y - 60, { steps: 8 });
+  await page.mouse.up();
+  const movedBox = await dialog.boundingBox();
+  if (!movedBox) {
+    throw new Error("Unable to resolve assistant position after dragging.");
+  }
+  expect(movedBox.x).toBeLessThan(scrolledBox.x);
+  expect(movedBox.y).toBeLessThan(scrolledBox.y);
+
+  const resizeHandle = page.getByTestId("ai-chat-resize-handle");
+  const resizeBox = await resizeHandle.boundingBox();
+  if (!resizeBox) {
+    throw new Error("Unable to resolve assistant resize handle.");
+  }
+  await page.mouse.move(
+    resizeBox.x + resizeBox.width / 2,
+    resizeBox.y + resizeBox.height / 2
+  );
+  await page.mouse.down();
+  await page.mouse.move(resizeBox.x + 50, resizeBox.y + 40, { steps: 8 });
+  await page.mouse.up();
+  const resizedBox = await dialog.boundingBox();
+  if (!resizedBox) {
+    throw new Error("Unable to resolve assistant after resizing.");
+  }
+  expect(resizedBox.width).toBeGreaterThan(movedBox.width);
+  expect(resizedBox.height).toBeGreaterThan(movedBox.height);
+  expect(resizedBox.x).toBeGreaterThanOrEqual(0);
+  expect(resizedBox.y).toBeGreaterThanOrEqual(0);
+  expect(resizedBox.x + resizedBox.width).toBeLessThanOrEqual(await page.evaluate(() => window.innerWidth));
+  expect(resizedBox.y + resizedBox.height).toBeLessThanOrEqual(await page.evaluate(() => window.innerHeight));
 });

@@ -78,9 +78,12 @@ Example request body:
 }
 ```
 
-## Part 10 sidebar check
+## Part 11 floating assistant check
 
-- Sign in and confirm the `Ask the board` sidebar appears beside the board on wide screens and below it on narrow screens.
+- Sign in and confirm the fixed assistant launcher appears in the lower-right corner without taking space from the board.
+- Click the launcher and confirm the `Ask the board` dialog appears above the board in the lower-right corner.
+- Drag the dialog by its header and resize it from the lower-right handle. Confirm it stays within the viewport.
+- Scroll the page when the board extends below the fold and confirm the assistant remains fixed in the same viewport position.
 - Enter a question and press `Send message`, or press Enter. Use Shift+Enter for a multiline question.
 - Confirm user and assistant messages appear in the conversation and that the send controls are disabled while the request is running.
 - When the assistant changes cards, confirm the board updates without a page reload and remains changed after reloading.

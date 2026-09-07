@@ -4,7 +4,7 @@
 
 This directory contains the existing Kanban Studio frontend. It is a Next.js 16 App Router application using TypeScript, React 19, Tailwind CSS 4, and `@dnd-kit` for drag and drop. `next.config.ts` is configured for a static export; production builds write the site to `out/` for FastAPI to serve.
 
-The current app loads the authenticated board from FastAPI and keeps the working board state in `KanbanBoard` while mutations are persisted through `src/lib/api.ts`. `src/app/page.tsx` renders `AuthGate`, which checks the FastAPI session, loads the board, and shows clear loading/error states. `AIChatSidebar` sends request-scoped conversation history to the structured AI endpoint and applies returned board updates through `KanbanBoard`.
+The current app loads the authenticated board from FastAPI and keeps the working board state in `KanbanBoard` while mutations are persisted through `src/lib/api.ts`. `src/app/page.tsx` renders `AuthGate`, which checks the FastAPI session, loads the board, and shows clear loading/error states. `AIChatSidebar` provides a fixed launcher and draggable/resizable dialog, sends request-scoped conversation history to the structured AI endpoint, and applies returned board updates through `KanbanBoard`.
 
 ## Structure
 
@@ -23,7 +23,7 @@ The current app loads the authenticated board from FastAPI and keeps the working
 - After sign-in, the app renders the five-column board loaded from SQLite through FastAPI.
 - Column titles can be edited inline.
 - Cards can be added, edited, removed, and moved within or between columns with `@dnd-kit`; successful changes persist after reload.
-- The AI sidebar renders request-scoped user/assistant messages, submits questions with prior history, and refreshes the board when the backend returns `updated: true`.
+- The AI assistant renders request-scoped user/assistant messages in a fixed floating dialog, submits questions with prior history, and refreshes the board when the backend returns `updated: true`.
 - The visual system uses the project colors in `src/app/globals.css`: yellow `#ecad0a`, blue `#209dd7`, purple `#753991`, navy `#032147`, and gray `#888888`.
 
 ## Commands
