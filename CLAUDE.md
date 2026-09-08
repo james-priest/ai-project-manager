@@ -16,10 +16,13 @@ Two apps combined into one Docker image:
 Request flow: browser loads the static SPA from FastAPI → `AuthGate` (frontend) checks `/api/auth/me` → on success, board loads via `src/lib/api.ts` from `/api/board` → all board mutations (rename column, create/update/delete/move card) go through same-origin `/api/board/*` routes and are persisted immediately to SQLite → the AI sidebar posts to `/api/ai/chat`, and if the response has `updated: true`, the frontend reloads the board.
 
 Backend module boundaries (`backend/app/`):
-- `main.py` — routes, session-cookie auth (in-memory `SESSION_STORE`, not persisted), dependency wiring.
-- `database.py` — SQLite schema init/seed and `BoardRepository` (all board reads/mutations; enforces ownership and ordering, rewrites affected positions in one transaction per mutation).
+- `main.py` — creates the `FastAPI` app, wires the lifespan (DB init) and static-file serving, includes the route modules. No business logic.
+- `config.py` — environment-derived settings: database path resolution, static-dir resolution (`FRONTEND_STATIC_DIR` vs. the placeholder), session cookie name/lifetime, the hardcoded MVP username.
+- `dependencies.py` — shared FastAPI dependencies: `get_current_user` (session-cookie auth, backed by the in-memory `SESSION_STORE`, not persisted), `create_session`, `get_board_repository`, `get_ai_provider`.
+- `routes/` — one router module per resource: `health.py`, `auth.py` (login/logout/me/example), `board.py` (board CRUD), `ai.py` (connectivity + chat). Routes depend on `dependencies.py`, never construct repositories/providers inline.
+- `database.py` — SQLite schema init/seed and `BoardRepository` (all board reads/mutations; enforces ownership and ordering, rewrites affected positions in one transaction per mutation via a shared `_insert_card_at_position` helper).
 - `ai.py` — builds the AI prompt from board state, strictly parses/validates the model's response into board operations, applies them via `BoardRepository`.
-- `openrouter.py` — `AIProvider` interface and `OpenRouterClient` implementation (model: `openai/gpt-oss-120b`), translates transport/provider errors into typed exceptions (`OpenRouterConfigurationError`, `OpenRouterTimeoutError`, `OpenRouterProviderError`) that `main.py` maps to HTTP status codes.
+- `openrouter.py` — `AIProvider` interface and `OpenRouterClient` implementation (model: `openai/gpt-oss-120b`), translates transport/provider errors into typed exceptions (`OpenRouterConfigurationError`, `OpenRouterTimeoutError`, `OpenRouterProviderError`) that the route modules map to HTTP status codes.
 - `schemas.py` — Pydantic request/response models shared by routes.
 
 The API always returns/consumes the full `BoardData` shape (columns with ordered `cardIds` + a `cards` map) even though SQLite stores normalized `users`/`boards`/`columns`/`cards` tables — the repository is responsible for reshaping between the two.

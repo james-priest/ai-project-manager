@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AuthGate } from "@/components/AuthGate";
-import { initialData } from "@/lib/kanban";
+import { testBoard } from "@/test/fixtures";
 
 describe("AuthGate", () => {
   afterEach(() => {
@@ -40,7 +40,7 @@ describe("AuthGate", () => {
         ok: true,
         json: async () => ({ authenticated: true, username: "user" }),
       })
-      .mockResolvedValueOnce({ ok: true, json: async () => initialData });
+      .mockResolvedValueOnce({ ok: true, json: async () => testBoard });
     vi.stubGlobal("fetch", fetchMock);
 
     render(<AuthGate />);
@@ -62,7 +62,7 @@ describe("AuthGate", () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => initialData,
+        json: async () => testBoard,
       });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
@@ -92,7 +92,7 @@ describe("AuthGate", () => {
         ok: true,
         json: async () => ({ authenticated: true, username: "user" }),
       })
-      .mockResolvedValueOnce({ ok: true, json: async () => initialData })
+      .mockResolvedValueOnce({ ok: true, json: async () => testBoard })
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ authenticated: false }),
@@ -118,7 +118,7 @@ describe("AuthGate", () => {
         ok: true,
         json: async () => ({ authenticated: true, username: "user" }),
       })
-      .mockResolvedValueOnce({ ok: true, json: async () => initialData })
+      .mockResolvedValueOnce({ ok: true, json: async () => testBoard })
       .mockResolvedValueOnce({ ok: false, status: 500 });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();

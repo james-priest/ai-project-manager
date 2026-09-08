@@ -122,3 +122,6 @@ export const getApiErrorMessage = (
   error: unknown,
   fallback: string
 ): string => (error instanceof ApiError ? error.message : fallback);
+
+export const isSessionExpiredError = (error: unknown): boolean =>
+  error instanceof ApiError && error.status === 401;

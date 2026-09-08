@@ -6,6 +6,16 @@ const signIn = async (page: Page) => {
   await page.getByLabel("Password").fill("password");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+
+  // The session cookie set by login can lag slightly behind the UI update,
+  // so wait for it before issuing any page.request calls that need it.
+  await expect
+    .poll(async () =>
+      (await page.context().cookies()).some(
+        (cookie) => cookie.name === "session_id"
+      )
+    )
+    .toBe(true);
 };
 
 const getBoard = async (page: Page) => {

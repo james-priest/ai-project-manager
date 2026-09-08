@@ -1,20 +1,20 @@
 import hashlib
-import os
+import hmac
 import secrets
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .config import get_database_path
 from .schemas import (
     BoardData,
     BoardOperation,
     CardData,
+    ColumnData,
     CreateCardOperation,
     EditCardOperation,
     MoveCardOperation,
 )
-
-DEFAULT_DATABASE_PATH = Path(__file__).resolve().parents[1] / "data" / "kanban.db"
 
 INITIAL_COLUMNS = [
     ("col-backlog", "Backlog", 0),
@@ -94,8 +94,27 @@ def password_hash(password: str) -> str:
     return f"pbkdf2_sha256$100000${salt.hex()}${digest.hex()}"
 
 
-def get_database_path() -> Path:
-    return Path(os.getenv("DATABASE_PATH", str(DEFAULT_DATABASE_PATH)))
+def verify_password(password: str, stored_hash: str) -> bool:
+    try:
+        algorithm, iterations, salt_hex, digest_hex = stored_hash.split("$")
+    except ValueError:
+        return False
+    if algorithm != "pbkdf2_sha256":
+        return False
+    computed = hashlib.pbkdf2_hmac(
+        "sha256", password.encode(), bytes.fromhex(salt_hex), int(iterations)
+    )
+    return hmac.compare_digest(computed.hex(), digest_hex)
+
+
+def get_user_password_hash(
+    username: str, database_path: Path | None = None
+) -> str | None:
+    with connect(database_path) as connection:
+        row = connection.execute(
+            "SELECT password_hash FROM users WHERE username = ?", (username,)
+        ).fetchone()
+        return row["password_hash"] if row else None
 
 
 def connect(database_path: Path | None = None) -> sqlite3.Connection:
@@ -253,11 +272,11 @@ class BoardRepository:
                     if operation.column_id not in column_card_ids:
                         raise BoardOperationError("Column not found")
                     card_ids = column_card_ids[operation.column_id]
-                    if operation.position > len(card_ids):
-                        raise BoardOperationError("Invalid card position")
 
                     card_id = f"card-{secrets.token_hex(8)}"
-                    card_ids.insert(operation.position, card_id)
+                    self._insert_card_at_position(
+                        card_ids, card_id, operation.position
+                    )
                     cards[card_id] = CardData(
                         id=card_id,
                         title=operation.title,
@@ -299,9 +318,9 @@ class BoardRepository:
                         if source_column_id == operation.target_column_id
                         else column_card_ids[operation.target_column_id]
                     )
-                    if operation.position > len(target_card_ids):
-                        raise BoardOperationError("Invalid card position")
-                    target_card_ids.insert(operation.position, operation.card_id)
+                    self._insert_card_at_position(
+                        target_card_ids, operation.card_id, operation.position
+                    )
                     continue
 
                 raise BoardOperationError("Unsupported board operation")
@@ -356,11 +375,11 @@ class BoardRepository:
 
         return BoardData(
             columns=[
-                {
-                    "id": column["id"],
-                    "title": column["title"],
-                    "cardIds": card_ids_by_column[column["id"]],
-                }
+                ColumnData(
+                    id=column["id"],
+                    title=column["title"],
+                    cardIds=card_ids_by_column[column["id"]],
+                )
                 for column in columns
             ],
             cards=card_data,
@@ -569,8 +588,7 @@ class BoardRepository:
                 if source_column_id == target_column_id
                 else self._card_ids(connection, target_column_id)
             )
-            insert_at = min(position, len(target_ids))
-            target_ids.insert(insert_at, card_id)
+            self._insert_card_at_position(target_ids, card_id, position)
 
             affected_columns = {source_column_id, target_column_id}
             self._offset_card_positions(connection, affected_columns)
@@ -633,6 +651,14 @@ class BoardRepository:
                 (column_id,),
             ).fetchall()
         ]
+
+    @staticmethod
+    def _insert_card_at_position(
+        card_ids: list[str], card_id: str, position: int
+    ) -> None:
+        if position > len(card_ids):
+            raise BoardOperationError("Invalid card position")
+        card_ids.insert(position, card_id)
 
     @staticmethod
     def _offset_card_positions(

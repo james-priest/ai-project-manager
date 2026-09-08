@@ -5,7 +5,8 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import app, get_ai_provider
+from backend.app.dependencies import get_ai_provider
+from backend.app.main import app
 from backend.app.openrouter import (
     OPENROUTER_API_URL,
     OPENROUTER_MODEL,

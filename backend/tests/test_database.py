@@ -3,12 +3,15 @@ from pathlib import Path
 import pytest
 
 from backend.app.database import (
+    BoardOperationError,
     BoardRepository,
     INITIAL_COLUMNS,
     INITIAL_CARDS,
     connect,
+    get_user_password_hash,
     initialize_database,
     password_hash,
+    verify_password,
 )
 
 
@@ -71,6 +74,38 @@ def test_repository_can_reorder_a_card_within_one_column(tmp_path: Path) -> None
     board = repository.get_board("user")
     assert board is not None
     assert board.columns[0].cardIds == ["card-2", "card-1"]
+
+
+def test_move_card_rejects_an_out_of_range_position(tmp_path: Path) -> None:
+    database_path = tmp_path / "kanban.db"
+    initialize_database(database_path)
+    repository = BoardRepository(database_path)
+
+    with pytest.raises(BoardOperationError):
+        repository.move_card("user", "card-1", "col-review", 99)
+
+    board = repository.get_board("user")
+    assert board is not None
+    assert board.columns[0].cardIds == ["card-1", "card-2"]
+    assert board.columns[3].cardIds == ["card-6"]
+
+
+def test_password_hash_round_trips_through_verify_password() -> None:
+    stored_hash = password_hash("correct horse")
+
+    assert verify_password("correct horse", stored_hash)
+    assert not verify_password("wrong password", stored_hash)
+
+
+def test_get_user_password_hash_returns_the_seeded_hash(tmp_path: Path) -> None:
+    database_path = tmp_path / "kanban.db"
+    initialize_database(database_path)
+
+    stored_hash = get_user_password_hash("user", database_path)
+
+    assert stored_hash is not None
+    assert verify_password("password", stored_hash)
+    assert get_user_password_hash("missing-user", database_path) is None
 
 
 def test_repository_rejects_other_users_and_unknown_resources(

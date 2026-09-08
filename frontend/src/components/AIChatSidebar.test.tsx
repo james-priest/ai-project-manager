@@ -1,9 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AIChatSidebar } from "@/components/AIChatSidebar";
-import { initialData, type BoardData } from "@/lib/kanban";
+import type { BoardData } from "@/lib/kanban";
+import { testBoard } from "@/test/fixtures";
 
-const chatResult = (response: string, board: BoardData = initialData, updated = false) => ({
+const chatResult = (response: string, board: BoardData = testBoard, updated = false) => ({
   response,
   board,
   updated,
@@ -53,11 +54,11 @@ describe("AIChatSidebar", () => {
 
   it("sends prior messages and applies an updated board", async () => {
     const updatedBoard: BoardData = {
-      ...initialData,
+      ...testBoard,
       cards: {
-        ...initialData.cards,
+        ...testBoard.cards,
         "card-1": {
-          ...initialData.cards["card-1"],
+          ...testBoard.cards["card-1"],
           title: "Updated roadmap themes",
         },
       },
@@ -143,6 +144,32 @@ describe("AIChatSidebar", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Unable to reach the AI assistant. Please try again."
     );
+  });
+
+  it("calls onSessionExpired instead of showing an error when the chat request returns 401", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({ detail: "Authentication required" }),
+      })
+    );
+    const onSessionExpired = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <AIChatSidebar onBoardUpdate={vi.fn()} onSessionExpired={onSessionExpired} />
+    );
+    await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Your question" }),
+      "Anything?"
+    );
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(onSessionExpired).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("opens as a dialog, focuses the question, and restores launcher focus on close", async () => {

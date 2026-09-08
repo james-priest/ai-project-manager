@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { KanbanBoard } from "@/components/KanbanBoard";
-import { initialData } from "@/lib/kanban";
+import { testBoard } from "@/test/fixtures";
 
 const getFirstColumn = () => screen.getAllByTestId(/column-/i)[0];
 
@@ -10,7 +10,7 @@ describe("KanbanBoard", () => {
     vi.unstubAllGlobals();
   });
 
-  const renderBoard = () => render(<KanbanBoard initialBoard={initialData} />);
+  const renderBoard = () => render(<KanbanBoard initialBoard={testBoard} />);
 
   it("renders five columns", () => {
     renderBoard();
@@ -127,5 +127,27 @@ describe("KanbanBoard", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Unable to remove card. Please try again."
     );
+  });
+
+  it("calls onSessionExpired instead of showing an error when a mutation returns 401", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ detail: "Authentication required" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onSessionExpired = vi.fn();
+    render(
+      <KanbanBoard
+        initialBoard={testBoard}
+        onSessionExpired={onSessionExpired}
+      />
+    );
+
+    const card = screen.getByTestId("card-card-1");
+    await userEvent.click(within(card).getByRole("button", { name: /delete/i }));
+
+    await waitFor(() => expect(onSessionExpired).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

@@ -64,6 +64,11 @@ export const AuthGate = () => {
     void loadWorkspace();
   }, [loadWorkspace]);
 
+  const handleSessionExpired = useCallback(() => {
+    setBoard(null);
+    setWorkspaceState("unauthenticated");
+  }, []);
+
   const handleLogout = async () => {
     setIsLoggingOut(true);
     setError(null);
@@ -125,6 +130,7 @@ export const AuthGate = () => {
           initialBoard={board}
           onLogout={handleLogout}
           isLoggingOut={isLoggingOut}
+          onSessionExpired={handleSessionExpired}
         />
       )}
     </>

@@ -4,7 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.database import BoardRepository
-from backend.app.main import app, get_ai_provider
+from backend.app.dependencies import get_ai_provider
+from backend.app.main import app
 from backend.app.openrouter import OpenRouterProviderError
 from backend.app.schemas import EditCardOperation
 

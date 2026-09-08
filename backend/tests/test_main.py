@@ -2,7 +2,8 @@ import time
 
 from fastapi.testclient import TestClient
 
-from backend.app.main import SESSION_COOKIE, SESSION_STORE, create_session
+from backend.app.config import SESSION_COOKIE
+from backend.app.dependencies import SESSION_STORE, create_session
 
 
 def login(client: TestClient) -> str:

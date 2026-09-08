@@ -1,5 +1,5 @@
 import { api, ApiError, getApiErrorMessage } from "@/lib/api";
-import { initialData } from "@/lib/kanban";
+import { testBoard } from "@/test/fixtures";
 
 describe("api client", () => {
   afterEach(() => {
@@ -126,7 +126,7 @@ describe("api client", () => {
   it("sends the chat question and request-scoped history", async () => {
     const chatResponse = {
       response: "I found one priority.",
-      board: initialData,
+      board: testBoard,
       updated: false,
     };
     const fetchMock = vi.fn().mockResolvedValue({

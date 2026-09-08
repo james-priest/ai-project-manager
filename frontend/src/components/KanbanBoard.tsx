@@ -14,7 +14,7 @@ import {
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { AIChatSidebar } from "@/components/AIChatSidebar";
-import { api, getApiErrorMessage } from "@/lib/api";
+import { api, getApiErrorMessage, isSessionExpiredError } from "@/lib/api";
 import {
   getCardDropPosition,
   moveCardToPosition,
@@ -25,6 +25,7 @@ type KanbanBoardProps = {
   initialBoard: BoardData;
   onLogout?: () => Promise<void> | void;
   isLoggingOut?: boolean;
+  onSessionExpired?: () => void;
 };
 
 const findColumn = (board: BoardData, id: string) =>
@@ -61,6 +62,7 @@ export const KanbanBoard = ({
   initialBoard,
   onLogout,
   isLoggingOut = false,
+  onSessionExpired,
 }: KanbanBoardProps) => {
   const [board, setBoard] = useState<BoardData>(() => initialBoard);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
@@ -129,6 +131,10 @@ export const KanbanBoard = ({
       .moveCard(activeId, targetColumn.id, position)
       .catch((error: unknown) => {
         setBoard(previousBoard);
+        if (isSessionExpiredError(error)) {
+          onSessionExpired?.();
+          return;
+        }
         setMutationError(
           getApiErrorMessage(error, "Unable to move card. Please try again.")
         );
@@ -149,6 +155,10 @@ export const KanbanBoard = ({
       await api.renameColumn(columnId, title);
     } catch (error) {
       setBoard(previousBoard);
+      if (isSessionExpiredError(error)) {
+        onSessionExpired?.();
+        return;
+      }
       setMutationError(
         getApiErrorMessage(error, "Unable to rename column. Please try again.")
       );
@@ -180,9 +190,13 @@ export const KanbanBoard = ({
         ),
       }));
     } catch (error) {
-      setMutationError(
-        getApiErrorMessage(error, "Unable to add card. Please try again.")
-      );
+      if (isSessionExpiredError(error)) {
+        onSessionExpired?.();
+      } else {
+        setMutationError(
+          getApiErrorMessage(error, "Unable to add card. Please try again.")
+        );
+      }
       throw error;
     }
   };
@@ -206,9 +220,13 @@ export const KanbanBoard = ({
       await api.updateCard(cardId, title, details);
     } catch (error) {
       setBoard(previousBoard);
-      setMutationError(
-        getApiErrorMessage(error, "Unable to save card. Please try again.")
-      );
+      if (isSessionExpiredError(error)) {
+        onSessionExpired?.();
+      } else {
+        setMutationError(
+          getApiErrorMessage(error, "Unable to save card. Please try again.")
+        );
+      }
       throw error;
     }
   };
@@ -235,6 +253,10 @@ export const KanbanBoard = ({
       await api.deleteCard(cardId);
     } catch (error) {
       setBoard(previousBoard);
+      if (isSessionExpiredError(error)) {
+        onSessionExpired?.();
+        return;
+      }
       setMutationError(
         getApiErrorMessage(error, "Unable to remove card. Please try again.")
       );
@@ -332,7 +354,10 @@ export const KanbanBoard = ({
             ) : null}
           </DragOverlay>
         </DndContext>
-        <AIChatSidebar onBoardUpdate={(nextBoard) => setBoard(nextBoard)} />
+        <AIChatSidebar
+          onBoardUpdate={(nextBoard) => setBoard(nextBoard)}
+          onSessionExpired={onSessionExpired}
+        />
       </main>
     </div>
   );

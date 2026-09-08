@@ -8,7 +8,12 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { api, getApiErrorMessage, type ChatMessage } from "@/lib/api";
+import {
+  api,
+  getApiErrorMessage,
+  isSessionExpiredError,
+  type ChatMessage,
+} from "@/lib/api";
 import type { BoardData } from "@/lib/kanban";
 import {
   clampAssistantGeometry,
@@ -20,6 +25,7 @@ import {
 
 type AIChatSidebarProps = {
   onBoardUpdate: (board: BoardData) => void;
+  onSessionExpired?: () => void;
 };
 
 type PointerInteraction = {
@@ -35,7 +41,10 @@ const getViewportSize = () => ({
   height: window.innerHeight,
 });
 
-export const AIChatSidebar = ({ onBoardUpdate }: AIChatSidebarProps) => {
+export const AIChatSidebar = ({
+  onBoardUpdate,
+  onSessionExpired,
+}: AIChatSidebarProps) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [question, setQuestion] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -115,12 +124,16 @@ export const AIChatSidebar = ({ onBoardUpdate }: AIChatSidebarProps) => {
         { role: "assistant", content: result.response },
       ]);
     } catch (chatError) {
-      setError(
-        getApiErrorMessage(
-          chatError,
-          "Unable to reach the AI assistant. Please try again."
-        )
-      );
+      if (isSessionExpiredError(chatError)) {
+        onSessionExpired?.();
+      } else {
+        setError(
+          getApiErrorMessage(
+            chatError,
+            "Unable to reach the AI assistant. Please try again."
+          )
+        );
+      }
     } finally {
       setIsSubmitting(false);
     }

@@ -1,7 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import SESSION_STORE, app
+from backend.app.dependencies import SESSION_STORE
+from backend.app.main import app
 
 
 @pytest.fixture(autouse=True)

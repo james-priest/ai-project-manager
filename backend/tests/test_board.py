@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
-from backend.app.main import SESSION_COOKIE, app
+from backend.app.config import SESSION_COOKIE
+from backend.app.main import app
 
 
 def login(client: TestClient) -> None:
@@ -126,6 +127,10 @@ def test_board_api_validates_input_and_missing_resources(
         "/api/board/cards/card-1/move",
         json={"target_column_id": "missing-column", "position": 0},
     ).status_code == 404
+    assert client.post(
+        "/api/board/cards/card-1/move",
+        json={"target_column_id": "col-review", "position": 99},
+    ).status_code == 400
 
 
 def test_board_changes_survive_a_new_application_client(client: TestClient) -> None:
