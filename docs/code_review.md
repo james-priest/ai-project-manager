@@ -1,131 +1,130 @@
 # Code Review
 
-Full-repository manual review (not diff-based) of the Project Management MVP: FastAPI backend, SQLite persistence, Next.js static-export frontend, and the OpenRouter-backed AI board assistant. Reviewed against `AGENTS.md`, `CLAUDE.md`, and `docs/`.
+Scope: full review of the backend (`backend/`), frontend (`frontend/`), Docker packaging, start/stop scripts, and tests. Findings are based on reading all source files, test files, and configuration. References use `file:line`.
 
-Scope: `backend/app/{main,database,ai,openrouter,schemas}.py`, `backend/tests/*.py`, `frontend/src/lib/*.ts`, all `frontend/src/components/*.tsx`, `frontend/src/app/*`, and build config.
+Overall verdict: a high-quality MVP. Architecture matches PLAN.md, tests are thorough, and the security basics are right. Two high-severity bugs need fixing before release; several medium issues are worth addressing but are not launch blockers.
 
-Date: 2026-09-08
+## High severity
 
-## Summary of actions
+### H1. Same-column move-to-end is rejected; the AI prompt encourages exactly that
 
-| # | Priority | Area | Action |
-|---|----------|------|--------|
-| 1 | High | Correctness | Unify `move_card` position validation between the single-card REST path and the AI batch path (§2.1) |
-| 2 | High | Security/Docs | Resolve the `password_hash` vs. plaintext-constant login mismatch — implement or document (§3.1 / §5.1) |
-| 3 | Medium | Frontend | Recover from mid-session auth expiry instead of showing a generic error forever (§2.2) |
-| 4 | Medium | Cleanup | Delete dead `initialData`/`createId` demo data from `frontend/src/lib/kanban.ts` (§4.1) |
-| 5 | Medium | Architecture | Extract a shared card-reordering helper used by both REST and AI mutation paths (§4.2) |
-| 6 | Low | Testing | Add a test for out-of-range `position` on the single-move REST path (§6.1) |
-| 7 | Low | Testing | Add component coverage for `handleDragEnd`'s rollback-on-failure branch (§6.2) |
-| 8 | Low | Security | Add `max_length` validation to user-supplied text fields (§3.2) |
-| 9 | Low | Frontend UX | Give blank column-title save inline validation feedback (§7.1) |
-| 10 | Low | Frontend UX | Add a dismiss control to the mutation-error banner (§7.2) |
-| 11 | Low | Frontend UX | Make card creation optimistic, consistent with other mutations (§7.3) |
-| — | — | Testing | Add direct unit coverage of `password_hash()` once #2 is resolved (§6.3) |
+- `backend/app/database.py:314-323` (`apply_operations`) and `backend/app/database.py:584-591` (`move_card`)
+- The card is removed from the source column's list *before* `_insert_card_at_position` (`database.py:656-661`) validates the position against the shortened list. For a column `[A, B]`, "move A to end of its column" means position `2`, which is legal per the prompt but rejected because the list is now `[B]` (length 1). The AI path has no clamp, so this yields a 502.
+- `backend/app/ai.py:48-50` tells the model positions "may be from 0 through the target column's current card count" - the prompt actively produces the failing request.
+- The frontend avoids this only by clamping in `frontend/src/lib/kanban.ts:84-87`; no such guard exists on the AI path.
+- Fix: either correct the prompt to `0..count-1` for same-column moves, or validate against the pre-removal count (a moved card still counts toward its own column's bound). Add a regression test: same-column move to `len(cards)`.
 
-## Strengths
+### H2. Escape in the column title editor saves the new title instead of cancelling
 
-- The SQLite position-reindexing technique (offset existing rows to a safe high range, then reassign `0..n-1`) correctly satisfies the `UNIQUE(column_id, position)` constraint without relying on deferred constraints (which SQLite doesn't fully support) — used correctly everywhere it appears.
-- Auth/ownership is consistently enforced at the SQL layer via `JOIN`s back to `users.username` in every mutation (`rename_column`, `update_card`, `delete_card`, `move_card`) rather than trusting client-supplied IDs.
-- The AI operation-application path (`ai.py` + `BoardRepository.apply_operations`) is well-guarded: strict Pydantic discriminated-union validation, duplicate-operation detection, and full rollback via `BoardOperationError` → `AIResponseError` on any invalid operation. Backend test coverage for this path (`test_ai.py`) is thorough, including several malformed-model-output cases.
-- The frontend's optimistic-update-with-rollback pattern (rename/edit/move/delete) is implemented correctly and consistently, aside from the auth-expiry gap noted in §2.2.
-- `CLAUDE.md`/`AGENTS.md`/`docs/*` are accurate and low-drift for a project built incrementally across ~11 "Parts" — unusually well-maintained documentation for an iteratively-built MVP.
+- `frontend/src/components/KanbanColumn.tsx:80-88`
+- The Escape handler calls `setDraftTitle(column.title)` then `event.currentTarget.blur()`. The synchronous `blur()` fires `onBlur` (line 79), which invokes `saveTitle` from the current render's closure - where `draftTitle` is still the user's edited text. The state update has not been applied to the captured closure, so `saveTitle` commits the rename to the server. The exact opposite of the intended revert.
+- Fix: guard `saveTitle` with an `isCancel` parameter or a ref flag set by the Escape handler. Add a test: type new text, press Escape, assert no PATCH request.
 
-## 1. Correctness bugs
+## Medium severity
 
-### 1.1 Inconsistent position validation: single-move vs. AI batch-move — **High**
+### M1. No `response_format` sent to OpenRouter
 
-- **Where:** `backend/app/database.py:572` (`BoardRepository.move_card`) vs. the `MoveCardOperation` handling in `apply_operations` (`backend/app/database.py:302`)
-- **Issue:** The single-card REST move path (`POST /api/board/cards/{id}/move`) silently clamps an out-of-range `position` via `insert_at = min(position, len(target_ids))`. The AI batch path raises `BoardOperationError` on the identical condition, rolling back the entire batch.
-- **Failure scenario:** A REST client (or a buggy frontend call) passes `position: 999` — the card silently lands at the end of the column with no error. The AI performing the same logical operation gets its whole multi-operation batch rejected. Same input class, two different outcomes depending on entry point.
-- **Fix:** Pick one behavior (clamping is friendlier for direct API/drag-and-drop use) and apply it in both places, or explicitly document why they differ.
+- `backend/app/openrouter.py:62-67` sends only `model` and `messages`. The strict-JSON contract rests entirely on the prompt in `backend/app/ai.py:19-60`. If the model wraps the JSON in a Markdown fence or adds prose, `parse_model_response` (`ai.py:63-69`) fails and the user gets a 502. Use OpenRouter/OpenAI structured outputs (`response_format: {"type": "json_schema", ...}`) to enforce the contract. There is also no test for the realistic fenced-JSON failure mode.
 
-### 1.2 Frontend never recovers from mid-session auth expiry — **Medium**
+### M2. Optimistic-update rollback restores stale whole-board snapshots
 
-- **Where:** All mutation handlers in `frontend/src/components/KanbanBoard.tsx` (`handleDragEnd:128`, `handleRenameColumn:149`, `handleAddCard:165`, `handleEditCard:206`, `handleDeleteCard:235`) and `frontend/src/components/AIChatSidebar.tsx:109`
-- **Issue:** These handlers catch API errors generically via `getApiErrorMessage` with no check for `ApiError.status === 401`. Only `AuthGate.tsx:23` and `LoginForm.tsx:30` handle 401.
-- **Failure scenario:** The 8-hour session (`SESSION_MAX_AGE`, `backend/app/main.py:44`) expires while the board is open. Every subsequent action (drag, edit, add, AI chat) fails with a generic "Unable to move/save/add card" banner forever — the user has no way back to the login screen short of a manual page reload.
-- **Fix:** Have `KanbanBoard`/`AIChatSidebar` bubble a 401 up to `AuthGate` (e.g. via a callback prop) to reset the workspace state to `"unauthenticated"`.
+- `frontend/src/components/KanbanBoard.tsx:117, 145, 209, 235`
+- Each mutation handler captures `const previousBoard = board` and restores it on failure. If a second mutation (or an AI board replacement, see M3) lands between the optimistic set and the failure, the rollback reverts everything to the older snapshot, silently discarding newer changes. A functional rollback scoped to the affected entity, or a sequence guard, fixes the root cause.
 
-## 2. Security
+### M3. AI board replacement races with in-flight optimistic mutations
 
-Weighted for what this actually is: a local, single-user MVP with one hardcoded account. "No rate limiting" etc. is not flagged as a real issue at this scale.
+- `frontend/src/components/AIChatSidebar.tsx:119-121` and `frontend/src/components/KanbanBoard.tsx:130-141`
+- `onBoardUpdate(result.board)` wholesale-replaces the board. A drag committed while a chat request is in flight can be overwritten by the AI response, and combined with M2 the failure path can leave the UI inconsistent with the server. Acceptable for an MVP, but the failure path makes it observable.
 
-### 2.1 Seeded `password_hash` is dead code; login uses a plaintext constant instead — **High**
+### M4. Escape-to-close only works while focus is inside the assistant
 
-- **Where:** `backend/app/database.py:91-94` (`password_hash`, seeded in `seed_initial_data` at line 164) vs. `backend/app/main.py:42,96` (`login`)
-- **Issue:** `seed_initial_data` generates and stores a real PBKDF2 hash of `"password"` in the `users` table. `login()` never reads it — it compares `credentials.password` directly against the hardcoded plaintext constant `MVP_PASSWORD = "password"`.
-- **Why it matters:** Not independently exploitable (the credential is hardcoded either way), but it's misleading: `docs/DATABASE.md:14` states the seed "does not store its plaintext password; initialization will generate the password hash," implying the hash is the real auth mechanism — it isn't. Anyone reading the docs or the seed code would reasonably assume login is hash-verified. The risk is false confidence, and future work wiring in a second real user while assuming `password_hash` verification already works.
-- **Fix:** Either wire `login()` to verify against `password_hash` (reuse `hashlib.pbkdf2_hmac` with the stored salt, parsing the `pbkdf2_sha256$...` format), or remove the seeded hash and update the doc to state auth is intentionally hardcoded-only for the MVP.
+- `frontend/src/components/AIChatSidebar.tsx:151-156, 282`
+- `handleDialogKeyDown` is attached to the `<aside>`. If focus moves to the board (no containment, which is fine for a non-modal), Escape no longer closes the dialog, so the "Escape to close" requirement is only partially met. A document-level key listener while open fixes it.
 
-### 2.2 No max-length validation on user-supplied text — **Low**
+### M5. `validate_operations_are_unique` rejects benign duplicate operations
 
-- **Where:** `backend/app/schemas.py` (`title`, `details`, `question`, `ConversationMessage.content` — none set `max_length`); no caps on the frontend either (`NewCardForm.tsx`, `KanbanCard.tsx`, `AIChatSidebar.tsx`)
-- **Issue:** Arbitrarily large text is accepted end-to-end and stored as-is in SQLite `TEXT` columns.
-- **Failure scenario:** A very large paste (card title/details, or an AI question) gets stored, then re-embedded verbatim into the AI prompt (`backend/app/ai.py:52`) — could blow past the model's context window or bloat the local SQLite file. Low severity for a local single-user demo, but cheap to add.
-- **Fix:** Add `Field(max_length=...)` to the relevant Pydantic fields; optionally mirror with `maxLength` on the frontend inputs.
+- `backend/app/ai.py:72-77`
+- Two identical operations in one batch are rejected, but an idempotent duplicate (same `edit_card` content, repeated `move_card`) is harmless; only duplicate `create_card` pairs are genuinely problematic. A model emitting a redundant duplicate causes a hard 502 instead of a no-op. Also leans over-engineered relative to the project's simplicity standard.
 
-## 3. Reuse / simplification / efficiency
+### M6. In-memory session store caveats
 
-### 3.1 Dead demo data left over from the pre-backend frontend — **Medium (easy, safe cleanup)**
+- `backend/app/dependencies.py:10-16`
+- Sessions are lost on container restart (users are logged out on `docker compose up --build`), expired entries are only purged on replay, and the design silently breaks with multiple workers. Acceptable for the single-worker local MVP (and documented in PLAN.md), but worth noting for the future multi-user version.
 
-- **Where:** `frontend/src/lib/kanban.ts:18-72` (`initialData`) and `:188-192` (`createId`)
-- **Verified:** Both are unused outside test files. `initialData` is imported only by `AuthGate.test.tsx`, `AIChatSidebar.test.tsx`, `KanbanBoard.test.tsx`, and `api.test.ts` as fixture data. `createId` has zero references anywhere, including tests.
-- **Why it matters:** Leftovers from the "frontend-only demo" phase (per `AGENTS.md`, before the backend became the source of truth for board data). Not a runtime bug, but a maintenance trap: `initialData` looks like it could be the real seed source, when the actual seed lives in `backend/app/database.py:19-84` — two disconnected copies of the same demo board that can silently drift.
-- **Fix:** Delete `initialData` and `createId` from `kanban.ts`; give the affected test files their own minimal inline fixture board.
+### M7. Cards cannot be moved with the keyboard
 
-### 3.2 Card-reordering logic duplicated across the REST and AI mutation paths — **Medium**
+- `frontend/src/components/KanbanBoard.tsx:71-75`
+- Only `PointerSensor` is configured; dnd-kit's `KeyboardSensor` is absent, so keyboard-only users cannot reorder or move cards. Given the app's otherwise strong keyboard support, this is the biggest accessibility gap.
 
-- **Where:** `backend/app/database.py:540-599` (`move_card`, REST path) vs. `:230-431` (`apply_operations` / `_persist_board_state`, AI path); `create_card`/`update_card`/`delete_card` (`:453-538`) each hand-roll their own position bookkeeping too.
-- **Issue:** Both paths independently reimplement "offset existing positions out of the way, then reassign `0..n-1`" with subtly different structure — which is exactly what produced the validation inconsistency in §1.1.
-- **Fix:** Extract a single shared helper — "apply a reordering to a set of columns given target card-ID lists" — called by both the REST handlers and the AI batch path, so there's one place to fix bugs or change validation rules.
+### M8. Multiple identical "Column title" labels
 
-## 4. Consistency with docs
+- `frontend/src/components/KanbanColumn.tsx:91`
+- All five column inputs share `aria-label="Column title"`, so a screen-reader rotor lists five indistinguishable fields. Include the column name or position in the label.
 
-### 4.1 `docs/DATABASE.md` password-hash claim doesn't match implementation — **High**
+## Low severity
 
-- **Where:** `docs/DATABASE.md:14` vs. `backend/app/main.py:92-98`
-- Same underlying issue as §2.1, from the docs-consistency angle: the doc describes hash-backed auth that the code doesn't deliver.
-- **Fix:** Same as §2.1 — implement or update the doc, whichever direction is chosen.
+### Backend
 
-No other doc/code drift found — `CLAUDE.md`/`AGENTS.md` route lists, module boundaries, exception classes, model name (`openai/gpt-oss-120b`), npm scripts, and coverage thresholds all check out against the real code.
+- `backend/app/routes/auth.py:25-33`: cookie `secure=False` is intentional for local HTTP but must flip behind TLS; no rate limiting on login (low impact with hardcoded credentials).
+- `backend/app/schemas.py:119-129` and `backend/app/ai.py:14-17`: `question` and history messages have no max length; a large history produces a large, expensive prompt. Add `max_length` constraints.
+- `backend/app/routes/ai.py:24-33` and `44-62`: identical exception mapping is copy-pasted between the two routes, and the `except OpenRouterError` fallback is unreachable because all concrete subclasses are caught first. A single FastAPI exception handler would remove ~20 lines.
+- `backend/pyproject.toml:6-10`: `pydantic` is imported directly (`schemas.py:3`, `ai.py:3`, `routes/auth.py:2`) but not declared as a dependency.
+- `backend/app/database.py:611-615`: when `target_column_id == source_column_id`, `target_ids` is the same object as `source_ids`, so the `else` branch is dead weight.
+- `backend/app/main.py:24-26`: the explicit `read_index` route duplicates what `StaticFiles(html=True)` at `main.py:34` already serves.
+- `backend/app/database.py:249-340`: read-modify-write board mutations are not concurrency-safe (interleaved reads can lose updates or hit the `UNIQUE(column_id, position)` constraint). Acceptable for the single-user MVP; worth a note, not a rewrite.
 
-## 5. Test coverage gaps
+### Frontend
 
-### 5.1 `move_card`'s out-of-range `position` clamping is untested — **Low (tied to §1.1)**
+- `frontend/src/components/KanbanColumn.tsx:38-40`: the `useEffect` resets `draftTitle` whenever `column.title` changes, so an AI-driven rename or a rollback wipes text the user is typing.
+- `frontend/src/components/AIChatSidebar.tsx:321-348`: the chat log does not scroll the newest message into view once history exceeds the dialog height.
+- `frontend/src/components/AIChatSidebar.tsx:109-136`: on failure the question stays in the message list unanswered and is not refilled into the textarea, making retry awkward.
+- `frontend/src/components/AuthGate.tsx:33-65`: no stale-response guard on overlapping `getBoard` requests; the slower response wins.
+- `frontend/src/components/KanbanCard.tsx:156`: delete has no confirmation or undo (acceptable for MVP, noted as a destructive-action concern).
+- `frontend/package.json:8`: `npm start` errors under `output: "export"`; the script is dead and misleading - remove it.
+- `frontend/playwright.config.ts:20-28`: the Playwright webServer leaves the Docker stack running after a test run; undocumented trade-off.
+- `frontend/src/lib/kanban.ts:104-130`: `moveCard` is only used by its own test (production uses `moveCardToPosition`); keeping it means part of the test suite exercises dead code.
+- `frontend/src/components/KanbanBoard.tsx:77`: `useMemo(() => board.cards, [board.cards])` returns its own dependency; use `board.cards` directly.
+- `frontend/src/components/KanbanBoard.tsx:31-34`: `findColumn` duplicates `findColumnId` in `frontend/src/lib/kanban.ts:21-26`.
+- `frontend/src/components/KanbanBoard.tsx:222-231`: card-edit failure reports both a board-level toast and a rethrow that produces a second in-form alert (same duplication in `NewCardForm.tsx:27-29`).
+- `frontend/tsconfig.json:5`: `allowJs: true` is unnecessary for an all-TS project.
+- `frontend/src/components/KanbanCard.tsx:127` and `KanbanCardPreview.tsx:11`: heading hierarchy jumps from `h1` to `h4`.
 
-- **Where:** `backend/tests/test_database.py` (move_card tests at lines 43, 69, 116, 119, 120, 137 — none use an out-of-range position)
-- **Issue:** No test exercises the single-move REST path with a `position` beyond the target column's length, so its clamping behavior (unlike the AI path's tested strict-reject at `test_ai.py:231`, `position: 99`) is unverified — the inconsistency in §1.1 could regress unnoticed in either direction.
-- **Fix:** Add a test asserting the clamping behavior explicitly (or, once §1.1 is resolved, a test asserting the unified behavior).
+## Requirements compliance
 
-### 5.2 `handleDragEnd`'s rollback-on-failure branch has no unit/component coverage — **Low**
+| Requirement | Status |
+|---|---|
+| Static NextJS export served at `/` | Met (`main.py:24-34`, `next.config.ts` `output: "export"`) |
+| `/api/*` routes | Met (health, auth, board, ai routers) |
+| uv package manager, `uv.lock` committed | Met (`Dockerfile:13-20`) |
+| SQLite auto-create and seed | Met (`database.py:120-126`, lifespan) |
+| Model `openai/gpt-oss-120b` | Met (`openrouter.py:7`) |
+| 20s timeout, controlled provider errors | Met, mapped to 502/503/504 |
+| Secrets not baked into image | Met (key flows via compose env; `.env` dockerignored) |
+| Strict JSON structured output | Partially met - prompt only, no `response_format` (M1) |
+| Escape-to-close on assistant | Partially met - only with focus inside the dialog (M4) |
+| Keyboard navigation | Partially met - cards not movable by keyboard (M7) |
 
-- **Where:** `frontend/src/components/KanbanBoard.tsx:81-136` (`handleDragEnd`, failure branch at `:130-135`) and `:328-331` (`DragOverlay`/`activeCard` render)
-- **Issue:** `KanbanBoard.test.tsx`'s five tests cover rename, add, edit, and delete — including delete's failure/rollback path (`"restores a card when a delete fails"`, line 118) — but none simulate a drag-end event. Drag-and-drop is only exercised at the Playwright e2e level (happy path only), so `handleDragEnd`'s own rollback-on-failure branch has no unit-level coverage, unlike the equivalent branches for delete/edit/rename.
-- **Fix:** Add a component-level test that fires a `dnd-kit` drag-end event (or calls `handleDragEnd` indirectly through a mocked failing `api.moveCard`) to verify the rollback branch, mirroring the existing delete-failure test.
+## Test coverage gaps
 
-### 5.3 `password_hash()` has no direct unit test — **Low, defer**
+In priority order; the first three map directly to the bugs above.
 
-- **Where:** `backend/app/database.py:91-94`; only indirectly exercised via a second-user seed in `test_database.py:86`
-- **Issue:** No test verifies the hash format round-trips correctly (correct password matches, incorrect one doesn't).
-- **Note:** This becomes moot if §2.1 is fixed by wiring `password_hash` into `login()` — it would then get real coverage through the existing login tests. Recommend deferring until that decision is made.
+1. Drag-and-drop failure path untested at unit level: `KanbanBoard.test.tsx` never exercises `handleDragEnd`, so the move-failure rollback (`KanbanBoard.tsx:130-141`) - the code affected by M2/M3 - has zero coverage.
+2. No test for Escape-cancel in the column title editor (would have caught H2).
+3. No test for same-column move-to-end (would have caught H1); existing move tests cover cross-column and same-column reorder-to-front only.
+4. Nothing asserts the behavior when the model returns a Markdown-fenced JSON block, the realistic failure mode of M1.
+5. `AuthGate` 401-during-`getBoard` and logout-failure-then-retry paths untested.
+6. `KanbanColumn`, `KanbanCard`, `NewCardForm` have no direct test files; behaviors like the `isSavingTitle` guard are only covered incidentally through `KanbanBoard.test.tsx`.
+7. Minor: `test_main.py:41-45` is sensitive to a developer-set `FRONTEND_STATIC_DIR` because `conftest.py` does not neutralize the env var; no test pins `OPENROUTER_MODEL` to the required value.
 
-## 6. Frontend-specific issues
+Note: the 80% coverage thresholds in `vitest.config.ts:15-20` are enforced and met; the concern is untested *behaviors*, not the threshold.
 
-### 6.1 Blank column-title save silently reverts with no feedback — **Low**
+## Things done well
 
-- **Where:** `frontend/src/components/KanbanColumn.tsx:42-49` (`saveTitle`)
-- **Issue:** Clearing the title input and blurring silently reverts to the previous title (`if (!nextTitle) setDraftTitle(column.title)`) with no error message — unlike every other form in the app (card add/edit, login), which shows a `role="alert"` message on invalid input.
-- **Fix:** Show a brief inline validation message consistent with the other forms.
-
-### 6.2 Mutation-error banner has no dismiss control or auto-clear — **Low**
-
-- **Where:** `frontend/src/components/KanbanBoard.tsx:248-254`
-- **Issue:** The fixed error banner only clears when the *next* mutation starts. If a user triggers one failing action and does nothing else, the banner persists indefinitely.
-- **Fix:** Add a dismiss (×) button and/or an auto-clear timeout.
-
-### 6.3 Card creation is the only mutation without optimistic UI — **Low, polish**
-
-- **Where:** `frontend/src/components/KanbanBoard.tsx:158-188` (`handleAddCard`) vs. every other handler, which applies state optimistically before awaiting the API call
-- **Issue:** `handleAddCard` waits for the server response before updating local state — no optimistic insert. Not a bug, but inconsistent: creating a card feels slower than every other action in an otherwise-optimistic UI.
-- **Fix (optional):** Apply an optimistic placeholder card with a temporary client-side ID, reconciled with the server-assigned ID on success.
+1. **Transactional AI operations**: `apply_operations` (`database.py:263-335`) simulates the full batch in memory and persists in one transaction only after validation; invalid model output never touches the DB. Both rollback paths are explicitly tested.
+2. **Ownership enforcement everywhere**: every mutation scopes by `username` through SQL joins, and cross-user isolation is thoroughly tested rather than trusted to the frontend.
+3. **Strong crypto and SQL hygiene**: PBKDF2-SHA256 with per-hash salt and `hmac.compare_digest`; parameterized SQL throughout.
+4. **Uniform 401 handling**: every mutation and chat call routes `ApiError(401)` to session-expiry handling, each with a dedicated unit test.
+5. **Well-tested pure geometry module**: `assistantGeometry.ts` covers all clamping math including degenerate tiny viewports, matching the project convention of keeping transformations in `src/lib/`.
+6. **Careful Docker layer caching**: dependency manifests copied before source in both stages, so code edits do not rebuild dependencies.
+7. **TypeScript discipline**: `strict: true`, no `any` in `src/`, discriminated state machine in `AuthGate`.
+8. **Leak-proof error taxonomy**: provider error details are tested never to reach the client, and mapped to precise status codes.
