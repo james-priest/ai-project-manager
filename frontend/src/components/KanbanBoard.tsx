@@ -1,23 +1,32 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
+  KeyboardSensor,
   PointerSensor,
+  closestCorners,
   useSensor,
   useSensors,
   pointerWithin,
+  type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
+import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { AIChatSidebar } from "@/components/AIChatSidebar";
 import { api, getApiErrorMessage, isSessionExpiredError } from "@/lib/api";
 import {
   getCardDropPosition,
+  getKeyboardDropPosition,
+  insertCard,
   moveCardToPosition,
+  removeCard,
+  setCard,
+  setColumnTitle,
   type BoardData,
 } from "@/lib/kanban";
 
@@ -33,30 +42,9 @@ const findColumn = (board: BoardData, id: string) =>
     (column) => column.id === id || column.cardIds.includes(id)
   );
 
-const getMovePosition = (
-  board: BoardData,
-  activeId: string,
-  targetColumnId: string,
-  overId: string,
-  activeRect?: { top: number; height: number } | null,
-  overRect?: { top: number; height: number }
-) => {
-  const targetColumn = board.columns.find(
-    (column) => column.id === targetColumnId
-  );
-  if (!targetColumn) {
-    return null;
-  }
-
-  return getCardDropPosition(
-    targetColumn.cardIds,
-    activeId,
-    overId,
-    overId === targetColumnId,
-    activeRect ?? undefined,
-    overRect
-  );
-};
+// Keyboard drags have no pointer coordinates, which pointerWithin needs.
+const collisionDetection: CollisionDetection = (args) =>
+  args.pointerCoordinates ? pointerWithin(args) : closestCorners(args);
 
 export const KanbanBoard = ({
   initialBoard,
@@ -67,21 +55,65 @@ export const KanbanBoard = ({
   const [board, setBoard] = useState<BoardData>(() => initialBoard);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const pendingMutations = useRef(new Set<Promise<unknown>>());
+  const mutationCount = useRef(0);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
     })
   );
 
   const cardsById = useMemo(() => board.cards, [board.cards]);
+
+  const trackMutation = <T,>(request: Promise<T>): Promise<T> => {
+    mutationCount.current += 1;
+    pendingMutations.current.add(request);
+    const forget = () => {
+      pendingMutations.current.delete(request);
+    };
+    request.then(forget, forget);
+    return request;
+  };
+
+  const handleMutationError = (error: unknown, fallback: string) => {
+    if (isSessionExpiredError(error)) {
+      onSessionExpired?.();
+      return;
+    }
+    setMutationError(getApiErrorMessage(error, fallback));
+  };
+
+  // The assistant's board snapshot can predate edits made while it was
+  // thinking, so reload from the server once local mutations have settled.
+  const refreshBoard = async () => {
+    try {
+      for (;;) {
+        await Promise.allSettled(pendingMutations.current);
+        const countBeforeLoad = mutationCount.current;
+        const latestBoard = await api.getBoard();
+        if (mutationCount.current === countBeforeLoad) {
+          setBoard(latestBoard);
+          return;
+        }
+      }
+    } catch (error) {
+      handleMutationError(
+        error,
+        "Unable to refresh the board. Please reload the page."
+      );
+    }
+  };
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveCardId(event.active.id as string);
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over, delta } = event;
+    const { active, over, delta, activatorEvent } = event;
     setActiveCardId(null);
 
     if (!over || active.id === over.id) {
@@ -96,72 +128,65 @@ export const KanbanBoard = ({
       return;
     }
 
-    const activeRect = active.rect.current.initial
-      ? {
-          top: active.rect.current.initial.top + delta.y,
-          height: active.rect.current.initial.height,
-        }
-      : active.rect.current.translated;
-    const position = getMovePosition(
-      board,
-      activeId,
-      targetColumn.id,
-      overId,
-      activeRect,
-      over.rect
-    );
-    if (position === null) {
-      return;
-    }
+    const isOverColumn = overId === targetColumn.id;
+    const initialRect = active.rect.current.initial;
+    const position =
+      activatorEvent instanceof KeyboardEvent
+        ? getKeyboardDropPosition(
+            targetColumn.cardIds,
+            activeId,
+            overId,
+            isOverColumn
+          )
+        : getCardDropPosition(
+            targetColumn.cardIds,
+            activeId,
+            overId,
+            isOverColumn,
+            initialRect
+              ? { top: initialRect.top + delta.y, height: initialRect.height }
+              : (active.rect.current.translated ?? undefined),
+            over.rect
+          );
 
-    const previousBoard = board;
-    const nextBoard = {
-      ...board,
+    const originalPosition = activeColumn.cardIds.indexOf(activeId);
+    setMutationError(null);
+    setBoard((prev) => ({
+      ...prev,
       columns: moveCardToPosition(
-        board.columns,
+        prev.columns,
         activeId,
         targetColumn.id,
         position
       ),
-    };
-    setMutationError(null);
-    setBoard(nextBoard);
+    }));
 
-    void api
-      .moveCard(activeId, targetColumn.id, position)
-      .catch((error: unknown) => {
-        setBoard(previousBoard);
-        if (isSessionExpiredError(error)) {
-          onSessionExpired?.();
-          return;
-        }
-        setMutationError(
-          getApiErrorMessage(error, "Unable to move card. Please try again.")
-        );
-      });
+    void trackMutation(api.moveCard(activeId, targetColumn.id, position)).catch(
+      (error: unknown) => {
+        setBoard((prev) => ({
+          ...prev,
+          columns: moveCardToPosition(
+            prev.columns,
+            activeId,
+            activeColumn.id,
+            originalPosition
+          ),
+        }));
+        handleMutationError(error, "Unable to move card. Please try again.");
+      }
+    );
   };
 
   const handleRenameColumn = async (columnId: string, title: string) => {
-    const previousBoard = board;
+    const previousTitle = findColumn(board, columnId)?.title ?? title;
     setMutationError(null);
-    setBoard((prev) => ({
-      ...prev,
-      columns: prev.columns.map((column) =>
-        column.id === columnId ? { ...column, title } : column
-      ),
-    }));
+    setBoard((prev) => setColumnTitle(prev, columnId, title));
 
     try {
-      await api.renameColumn(columnId, title);
+      await trackMutation(api.renameColumn(columnId, title));
     } catch (error) {
-      setBoard(previousBoard);
-      if (isSessionExpiredError(error)) {
-        onSessionExpired?.();
-        return;
-      }
-      setMutationError(
-        getApiErrorMessage(error, "Unable to rename column. Please try again.")
-      );
+      setBoard((prev) => setColumnTitle(prev, columnId, previousTitle));
+      handleMutationError(error, "Unable to rename column. Please try again.");
     }
   };
 
@@ -172,31 +197,19 @@ export const KanbanBoard = ({
   ) => {
     setMutationError(null);
     try {
-      const { id } = await api.createCard(
-        columnId,
-        title,
-        details || "No details yet."
+      const { id } = await trackMutation(
+        api.createCard(columnId, title, details || "No details yet.")
       );
-      setBoard((prev) => ({
-        ...prev,
-        cards: {
-          ...prev.cards,
-          [id]: { id, title, details: details || "No details yet." },
-        },
-        columns: prev.columns.map((column) =>
-          column.id === columnId
-            ? { ...column, cardIds: [...column.cardIds, id] }
-            : column
-        ),
-      }));
+      setBoard((prev) =>
+        insertCard(
+          prev,
+          columnId,
+          { id, title, details: details || "No details yet." },
+          Infinity
+        )
+      );
     } catch (error) {
-      if (isSessionExpiredError(error)) {
-        onSessionExpired?.();
-      } else {
-        setMutationError(
-          getApiErrorMessage(error, "Unable to add card. Please try again.")
-        );
-      }
+      handleMutationError(error, "Unable to add card. Please try again.");
       throw error;
     }
   };
@@ -206,60 +219,33 @@ export const KanbanBoard = ({
     title: string,
     details: string
   ) => {
-    const previousBoard = board;
+    const previousCard = board.cards[cardId];
     setMutationError(null);
-    setBoard((prev) => ({
-      ...prev,
-      cards: {
-        ...prev.cards,
-        [cardId]: { id: cardId, title, details },
-      },
-    }));
+    setBoard((prev) => setCard(prev, { id: cardId, title, details }));
 
     try {
-      await api.updateCard(cardId, title, details);
+      await trackMutation(api.updateCard(cardId, title, details));
     } catch (error) {
-      setBoard(previousBoard);
-      if (isSessionExpiredError(error)) {
-        onSessionExpired?.();
-      } else {
-        setMutationError(
-          getApiErrorMessage(error, "Unable to save card. Please try again.")
-        );
-      }
+      setBoard((prev) => setCard(prev, previousCard));
+      handleMutationError(error, "Unable to save card. Please try again.");
       throw error;
     }
   };
 
   const handleDeleteCard = async (columnId: string, cardId: string) => {
-    const previousBoard = board;
+    const previousCard = board.cards[cardId];
+    const previousPosition =
+      findColumn(board, columnId)?.cardIds.indexOf(cardId) ?? 0;
     setMutationError(null);
-    setBoard((prev) => ({
-      ...prev,
-      cards: Object.fromEntries(
-        Object.entries(prev.cards).filter(([id]) => id !== cardId)
-      ),
-      columns: prev.columns.map((column) =>
-        column.id === columnId
-          ? {
-              ...column,
-              cardIds: column.cardIds.filter((id) => id !== cardId),
-            }
-          : column
-      ),
-    }));
+    setBoard((prev) => removeCard(prev, cardId));
 
     try {
-      await api.deleteCard(cardId);
+      await trackMutation(api.deleteCard(cardId));
     } catch (error) {
-      setBoard(previousBoard);
-      if (isSessionExpiredError(error)) {
-        onSessionExpired?.();
-        return;
-      }
-      setMutationError(
-        getApiErrorMessage(error, "Unable to remove card. Please try again.")
+      setBoard((prev) =>
+        insertCard(prev, columnId, previousCard, previousPosition)
       );
+      handleMutationError(error, "Unable to remove card. Please try again.");
     }
   };
 
@@ -329,7 +315,7 @@ export const KanbanBoard = ({
 
         <DndContext
           sensors={sensors}
-          collisionDetection={pointerWithin}
+          collisionDetection={collisionDetection}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
@@ -355,7 +341,7 @@ export const KanbanBoard = ({
           </DragOverlay>
         </DndContext>
         <AIChatSidebar
-          onBoardUpdate={(nextBoard) => setBoard(nextBoard)}
+          onBoardChanged={() => void refreshBoard()}
           onSessionExpired={onSessionExpired}
         />
       </main>

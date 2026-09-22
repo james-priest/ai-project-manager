@@ -89,6 +89,7 @@ export const KanbanColumn = ({
                 event.currentTarget.blur();
               }
               if (event.key === "Escape") {
+                event.preventDefault();
                 cancelTitleEditRef.current = true;
                 setDraftTitle(column.title);
                 event.currentTarget.blur();

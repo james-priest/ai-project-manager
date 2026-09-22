@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..ai import AIResponseError, run_ai_chat
+from ..database import BoardRepository
 from ..dependencies import get_ai_provider, get_board_repository, get_current_user
 from ..openrouter import (
     AIProvider,
@@ -40,14 +41,10 @@ def ai_chat(
     request: AIChatRequest,
     username: str = Depends(get_current_user),
     provider: AIProvider = Depends(get_ai_provider),
+    repository: BoardRepository = Depends(get_board_repository),
 ) -> AIChatResponse:
     try:
-        return run_ai_chat(
-            provider,
-            get_board_repository(),
-            username,
-            request,
-        )
+        return run_ai_chat(provider, repository, username, request)
     except LookupError as error:
         raise HTTPException(status_code=404, detail="Board not found") from error
     except OpenRouterConfigurationError as error:

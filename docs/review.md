@@ -12,7 +12,7 @@ Verification performed:
 
 Relationship to `docs/code_review.md`: most findings from that earlier review are still present in the code. They are restated here so this document stands alone; items new to this review are marked **(new)**.
 
-Overall: a clean, well-tested MVP with sound structure and correct security basics. Both confirmed high-severity bugs have since been fixed (see H1 and H2); the rest are quality and robustness improvements.
+Overall: a clean, well-tested MVP with sound structure and correct security basics. All high- and medium-severity findings (H1, H2, M1-M7) have since been fixed; the remaining low-severity items are quality and robustness improvements.
 
 ## High severity
 
@@ -38,36 +38,50 @@ Overall: a clean, well-tested MVP with sound structure and correct security basi
 
 ## Medium severity
 
-### M1. Board routes bypass FastAPI dependency injection (new)
+### M1. Board routes bypass FastAPI dependency injection (new) - FIXED
+
+- **Status: fixed.** Both routers now take `repository: BoardRepository = Depends(get_board_repository)`, so the repository is overridable in tests like `get_ai_provider`.
 
 - `backend/app/routes/board.py:18,30,43,57,70,83`, `backend/app/routes/ai.py:47`
 - Routes call `get_board_repository()` directly instead of `Depends(get_board_repository)`. CLAUDE.md states routes should depend on `dependencies.py`; as written the repository cannot be overridden via `app.dependency_overrides` (tests work around it with the `DATABASE_PATH` env var). `get_ai_provider` is injected correctly, so this is also inconsistent.
 
-### M2. Model output format is enforced only by the prompt
+### M2. Model output format is enforced only by the prompt - FIXED
+
+- **Status: fixed.** `OpenRouterClient.complete` takes `json_output`, and the chat path sends `response_format: {"type": "json_object"}` plus `provider: {"require_parameters": true}` so only providers that honor it are used; the connectivity prompt still asks for plain text. Verified with one live OpenRouter call. Regression test: `test_openrouter_client_requests_json_output_when_asked`.
 
 - `backend/app/openrouter.py:62-67` sends only `model` and `messages`. A response wrapped in a Markdown fence or with leading prose fails `parse_model_response` (`backend/app/ai.py:63-69`) and becomes a 502. Pass `response_format` (JSON schema / `json_object`) to OpenRouter. No test covers the fenced-JSON case.
 
-### M3. Optimistic rollbacks restore stale whole-board snapshots
+### M3. Optimistic rollbacks restore stale whole-board snapshots - FIXED
+
+- **Status: fixed.** Handlers capture only the affected entity and roll back through the new `setColumnTitle` / `setCard` / `removeCard` / `insertCard` transforms in `frontend/src/lib/kanban.ts`; the move handler restores the card's original column and index. Regression tests: `rolls back only the failed change when mutations overlap` in `KanbanBoard.test.tsx` and the transform tests in `kanban.test.ts`.
 
 - `frontend/src/components/KanbanBoard.tsx:117,145,209,235`
 - Each handler captures `previousBoard = board` and restores it on failure. Any mutation or AI board replacement that lands in between is silently undone. Roll back only the affected entity, or refetch the board on failure.
 
-### M4. AI board replacement races with in-flight user edits
+### M4. AI board replacement races with in-flight user edits - FIXED
+
+- **Status: fixed.** The sidebar prop is now `onBoardChanged()`; `KanbanBoard.refreshBoard` waits for pending mutations to settle, reloads from `/api/board`, and repeats if another mutation started during the load. Regression test: `reloads the board after an assistant update once pending edits settle`.
 
 - `frontend/src/components/AIChatSidebar.tsx:119-121`, `frontend/src/components/KanbanBoard.tsx:358`
 - `onBoardUpdate(result.board)` replaces the board wholesale. A drag made while a chat request is pending can be overwritten visually, and combined with M3 a later rollback can leave the UI inconsistent with the server.
 
-### M5. Escape closes the assistant only while focus is inside it
+### M5. Escape closes the assistant only while focus is inside it - FIXED
+
+- **Status: fixed.** A document-level `keydown` listener runs while the dialog is open and ignores events an inner control already handled (`event.defaultPrevented`), so Escape in a column title only cancels the rename. Regression tests: `closes on Escape even when focus has moved outside the assistant` and `leaves the assistant open when an inner control already handled Escape`.
 
 - `frontend/src/components/AIChatSidebar.tsx:151-156,282`
 - The key handler is on the `<aside>`. Once focus moves to the board, Escape does nothing. Use a document-level `keydown` listener while open (the existing `useEffect` at line 59 is a natural home).
 
-### M6. Cards cannot be moved with the keyboard
+### M6. Cards cannot be moved with the keyboard - FIXED
+
+- **Status: fixed.** `KeyboardSensor` with `sortableKeyboardCoordinates` is registered, collision detection falls back to `closestCorners` when there are no pointer coordinates, keyboard drops use arrayMove semantics via `getKeyboardDropPosition`, and each card is its own activator node so Enter/Space on its buttons and edit fields no longer starts a drag. Regression tests: `getKeyboardDropPosition` unit tests and the `moves cards with the keyboard` Playwright journey.
 
 - `frontend/src/components/KanbanBoard.tsx:71-75`
 - Only `PointerSensor` is registered. Add dnd-kit's `KeyboardSensor` with `sortableKeyboardCoordinates`.
 
-### M7. Duplicate operations in an AI batch cause a hard failure
+### M7. Duplicate operations in an AI batch cause a hard failure - FIXED
+
+- **Status: fixed.** `validate_operations_are_unique` is removed; operations apply in the order the model lists them, so a repeated `create_card` now creates two cards. Regression test: `test_chat_applies_repeated_identical_operations`.
 
 - `backend/app/ai.py:72-77`
 - `validate_operations_are_unique` rejects any repeated operation, including harmless ones (identical `edit_card`). The user sees a 502 for an otherwise valid response. Either drop the check or dedupe instead of failing.
@@ -117,8 +131,8 @@ Overall: a clean, well-tested MVP with sound structure and correct security basi
 
 1. ~~Same-column move to `len(cards)` via both the REST route and `apply_operations` (H1).~~ Added.
 2. ~~Escape-cancel in the column title editor (H2).~~ Added.
-3. `KanbanBoard.handleDragEnd`, including the move-failure rollback, has no unit coverage.
-4. Model response wrapped in a Markdown fence (M2).
+3. `KanbanBoard.handleDragEnd` still has no unit coverage; the `moves cards with the keyboard` Playwright test now exercises it end to end, and the move-failure rollback remains untested.
+4. ~~Model response wrapped in a Markdown fence (M2).~~ Prevented at the source by `response_format`, so no test was added for the fenced output itself.
 5. Chat failure followed by a retry (history shape).
 6. `KanbanColumn`, `KanbanCard`, and `NewCardForm` have no direct test files.
 

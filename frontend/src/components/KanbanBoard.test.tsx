@@ -147,6 +147,94 @@ describe("KanbanBoard", () => {
     );
   });
 
+  it("rolls back only the failed change when mutations overlap", async () => {
+    let rejectDelete: (error: Error) => void = () => {};
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        return new Promise((_, reject) => {
+          rejectDelete = reject;
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ updated: true }) });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderBoard();
+
+    const card = screen.getByTestId("card-card-1");
+    await userEvent.click(within(card).getByRole("button", { name: /delete/i }));
+    expect(screen.queryByText("Align roadmap themes")).not.toBeInTheDocument();
+
+    const input = within(getFirstColumn()).getByLabelText("Column title");
+    await userEvent.clear(input);
+    await userEvent.type(input, "Renamed{Enter}");
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/board/columns/col-backlog",
+        expect.objectContaining({ method: "PATCH" })
+      )
+    );
+
+    rejectDelete(new Error("offline"));
+
+    expect(await screen.findByText("Align roadmap themes")).toBeInTheDocument();
+    expect(
+      within(getFirstColumn()).getAllByTestId(/card-/).map((node) => node.dataset.testid)
+    ).toEqual(["card-card-1", "card-card-2"]);
+    // The header lists column titles from board state; the rename must survive.
+    expect(screen.getByText("Renamed")).toBeInTheDocument();
+    expect(screen.queryByText("Backlog")).not.toBeInTheDocument();
+  });
+
+  it("reloads the board after an assistant update once pending edits settle", async () => {
+    let resolveDelete: () => void = () => {};
+    const serverBoard = {
+      ...testBoard,
+      cards: {
+        ...testBoard.cards,
+        "card-2": { ...testBoard.cards["card-2"], title: "Edited by assistant" },
+      },
+      columns: testBoard.columns.map((column) =>
+        column.id === "col-backlog" ? { ...column, cardIds: ["card-2"] } : column
+      ),
+    };
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        return new Promise((resolve) => {
+          resolveDelete = () =>
+            resolve({ ok: true, json: async () => ({ deleted: true }) });
+        });
+      }
+      if (url === "/api/ai/chat") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ response: "Done.", board: testBoard, updated: true }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => serverBoard });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderBoard();
+
+    const card = screen.getByTestId("card-card-1");
+    await user.click(within(card).getByRole("button", { name: /delete/i }));
+
+    await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
+    await user.type(screen.getByRole("textbox", { name: "Your question" }), "Edit card 2{Enter}");
+    await screen.findByText("Done.");
+
+    const boardRequests = () =>
+      fetchMock.mock.calls.filter(([url]) => url === "/api/board");
+    expect(boardRequests()).toHaveLength(0);
+    expect(screen.queryByText("Align roadmap themes")).not.toBeInTheDocument();
+
+    resolveDelete();
+
+    expect(await screen.findByText("Edited by assistant")).toBeInTheDocument();
+    expect(boardRequests()).toHaveLength(1);
+    expect(screen.queryByText("Align roadmap themes")).not.toBeInTheDocument();
+  });
+
   it("calls onSessionExpired instead of showing an error when a mutation returns 401", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,

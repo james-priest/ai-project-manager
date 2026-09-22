@@ -15,9 +15,11 @@ class FakeProvider:
         self.response = response
         self.error = error
         self.prompts: list[str] = []
+        self.json_outputs: list[bool] = []
 
-    def complete(self, prompt: str) -> str:
+    def complete(self, prompt: str, json_output: bool = False) -> str:
         self.prompts.append(prompt)
+        self.json_outputs.append(json_output)
         if self.error:
             raise self.error
         return self.response
@@ -67,6 +69,7 @@ def test_chat_prompt_contains_board_question_and_history(
     assert "What should we prioritize?" in prompt
     assert "Summarize the board." in prompt
     assert "The review queue is next." in prompt
+    assert provider.json_outputs == [True]
 
 
 def test_chat_can_create_a_card(client: TestClient) -> None:
@@ -127,6 +130,23 @@ def test_chat_can_edit_a_card(client: TestClient) -> None:
     card = response.json()["board"]["cards"]["card-1"]
     assert card["title"] == "Align strategic themes"
     assert card["details"] == "Add measurable quarterly outcomes."
+
+
+def test_chat_applies_repeated_identical_operations(client: TestClient) -> None:
+    edit = {
+        "operation": "edit_card",
+        "card_id": "card-1",
+        "title": "Same edit",
+        "details": "",
+    }
+    provider = FakeProvider(model_response("Updated.", [edit, edit]))
+    app.dependency_overrides[get_ai_provider] = lambda: provider
+    login(client)
+
+    response = client.post("/api/ai/chat", json={"question": "Rename card 1."})
+
+    assert response.status_code == 200
+    assert response.json()["board"]["cards"]["card-1"]["title"] == "Same edit"
 
 
 def test_chat_can_move_a_card(client: TestClient) -> None:
@@ -231,23 +251,6 @@ def test_chat_applies_multiple_operations_in_order(client: TestClient) -> None:
                     "target_column_id": "col-review",
                     "position": 99,
                 }
-            ],
-        ),
-        model_response(
-            "Duplicate.",
-            [
-                {
-                    "operation": "edit_card",
-                    "card_id": "card-1",
-                    "title": "Same edit",
-                    "details": "",
-                },
-                {
-                    "operation": "edit_card",
-                    "card_id": "card-1",
-                    "title": "Same edit",
-                    "details": "",
-                },
             ],
         ),
     ],

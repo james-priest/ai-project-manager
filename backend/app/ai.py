@@ -69,14 +69,6 @@ def parse_model_response(raw_response: str) -> AIModelResponse:
         ) from error
 
 
-def validate_operations_are_unique(response: AIModelResponse) -> None:
-    serialized_operations = [
-        operation.model_dump_json() for operation in response.operations
-    ]
-    if len(serialized_operations) != len(set(serialized_operations)):
-        raise AIResponseError("OpenRouter returned duplicate board operations.")
-
-
 def run_ai_chat(
     provider: AIProvider,
     repository: BoardRepository,
@@ -88,8 +80,9 @@ def run_ai_chat(
         raise LookupError("Board not found")
 
     prompt = build_chat_prompt(board, request)
-    model_response = parse_model_response(provider.complete(prompt))
-    validate_operations_are_unique(model_response)
+    model_response = parse_model_response(
+        provider.complete(prompt, json_output=True)
+    )
 
     try:
         resulting_board = repository.apply_operations(

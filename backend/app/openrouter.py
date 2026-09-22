@@ -9,8 +9,11 @@ DEFAULT_TIMEOUT_SECONDS = 20.0
 
 
 class AIProvider(Protocol):
-    def complete(self, prompt: str) -> str:
-        """Return the provider's text response for a prompt."""
+    def complete(self, prompt: str, json_output: bool = False) -> str:
+        """Return the provider's text response for a prompt.
+
+        With json_output, the provider must return a single JSON object.
+        """
 
 
 class OpenRouterError(RuntimeError):
@@ -42,11 +45,20 @@ class OpenRouterClient:
         self.timeout = timeout
         self.transport = transport
 
-    def complete(self, prompt: str) -> str:
+    def complete(self, prompt: str, json_output: bool = False) -> str:
         if not self.api_key:
             raise OpenRouterConfigurationError(
                 "OpenRouter API key is not configured."
             )
+
+        payload: dict[str, object] = {
+            "model": OPENROUTER_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if json_output:
+            payload["response_format"] = {"type": "json_object"}
+            # Route only to providers that honor response_format.
+            payload["provider"] = {"require_parameters": True}
 
         try:
             with httpx.Client(
@@ -59,12 +71,7 @@ class OpenRouterClient:
                         "Authorization": f"Bearer {self.api_key}",
                         "Content-Type": "application/json",
                     },
-                    json={
-                        "model": OPENROUTER_MODEL,
-                        "messages": [
-                            {"role": "user", "content": prompt},
-                        ],
-                    },
+                    json=payload,
                 )
                 response.raise_for_status()
         except httpx.TimeoutException as error:

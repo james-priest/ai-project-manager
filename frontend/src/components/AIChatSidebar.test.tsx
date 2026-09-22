@@ -17,7 +17,7 @@ describe("AIChatSidebar", () => {
   });
 
   it("shows an empty conversation and validates a blank question", async () => {
-    render(<AIChatSidebar onBoardUpdate={vi.fn()} />);
+    render(<AIChatSidebar onBoardChanged={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: "Open workspace assistant" })).toBeInTheDocument();
     await userEvent.click(
@@ -38,7 +38,7 @@ describe("AIChatSidebar", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
-    render(<AIChatSidebar onBoardUpdate={vi.fn()} />);
+    render(<AIChatSidebar onBoardChanged={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
 
     const input = screen.getByRole("textbox", { name: "Your question" });
@@ -74,9 +74,9 @@ describe("AIChatSidebar", () => {
         json: async () => chatResult("I updated the roadmap.", updatedBoard, true),
       });
     vi.stubGlobal("fetch", fetchMock);
-    const onBoardUpdate = vi.fn();
+    const onBoardChanged = vi.fn();
     const user = userEvent.setup();
-    render(<AIChatSidebar onBoardUpdate={onBoardUpdate} />);
+    render(<AIChatSidebar onBoardChanged={onBoardChanged} />);
     await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
 
     const input = screen.getByRole("textbox", { name: "Your question" });
@@ -87,7 +87,7 @@ describe("AIChatSidebar", () => {
     await user.type(input, "Update the first task.");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() => expect(onBoardUpdate).toHaveBeenCalledWith(updatedBoard));
+    await waitFor(() => expect(onBoardChanged).toHaveBeenCalledTimes(1));
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "/api/ai/chat",
@@ -113,7 +113,7 @@ describe("AIChatSidebar", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
-    render(<AIChatSidebar onBoardUpdate={vi.fn()} />);
+    render(<AIChatSidebar onBoardChanged={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
 
     const input = screen.getByRole("textbox", { name: "Your question" });
@@ -132,7 +132,7 @@ describe("AIChatSidebar", () => {
   it("reports a provider error", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     const user = userEvent.setup();
-    render(<AIChatSidebar onBoardUpdate={vi.fn()} />);
+    render(<AIChatSidebar onBoardChanged={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
 
     await user.type(
@@ -158,7 +158,7 @@ describe("AIChatSidebar", () => {
     const onSessionExpired = vi.fn();
     const user = userEvent.setup();
     render(
-      <AIChatSidebar onBoardUpdate={vi.fn()} onSessionExpired={onSessionExpired} />
+      <AIChatSidebar onBoardChanged={vi.fn()} onSessionExpired={onSessionExpired} />
     );
     await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
 
@@ -174,7 +174,7 @@ describe("AIChatSidebar", () => {
 
   it("opens as a dialog, focuses the question, and restores launcher focus on close", async () => {
     const user = userEvent.setup();
-    render(<AIChatSidebar onBoardUpdate={vi.fn()} />);
+    render(<AIChatSidebar onBoardChanged={vi.fn()} />);
 
     const launcher = screen.getByRole("button", {
       name: "Open workspace assistant",
@@ -189,6 +189,40 @@ describe("AIChatSidebar", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Open workspace assistant" })).toHaveFocus());
+  });
+
+  it("closes on Escape even when focus has moved outside the assistant", async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <button type="button">Board control</button>
+        <AIChatSidebar onBoardChanged={vi.fn()} />
+      </>
+    );
+    await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Board control" }));
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("leaves the assistant open when an inner control already handled Escape", async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <input aria-label="Handles escape" onKeyDown={(event) => event.preventDefault()} />
+        <AIChatSidebar onBoardChanged={vi.fn()} />
+      </>
+    );
+    await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("textbox", { name: "Handles escape" }));
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
   it("supports pointer drag, pointer resize, keyboard resize, and viewport correction", async () => {
@@ -209,7 +243,7 @@ describe("AIChatSidebar", () => {
     });
 
     const user = userEvent.setup();
-    render(<AIChatSidebar onBoardUpdate={vi.fn()} />);
+    render(<AIChatSidebar onBoardChanged={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
 
     const dialog = screen.getByRole("dialog");

@@ -259,3 +259,69 @@ test("moves a card into an empty column", async ({ page }) => {
     expect(restoreEmptyColumnResponse.ok()).toBeTruthy();
   }
 });
+
+test("moves cards with the keyboard", async ({ page }) => {
+  await signIn(page);
+
+  const resetResponse = await page.request.post(
+    "/api/board/cards/card-1/move",
+    { data: { target_column_id: "col-backlog", position: 0 } }
+  );
+  expect(resetResponse.ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+
+  const moveWithKeyboard = async (
+    key: "ArrowDown" | "ArrowRight",
+    overId: string
+  ) => {
+    const responsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/board/cards/card-1/move") &&
+        response.request().method() === "POST"
+    );
+    const card = page.getByTestId("card-card-1");
+    await card.focus();
+    await page.keyboard.press("Space");
+    await expect(card).toHaveAttribute("aria-pressed", "true");
+    // dnd-kit attaches its keydown listener on a timer after pickup, so an
+    // early arrow press can be dropped. Re-press until the live region
+    // announces the expected drop target.
+    const liveRegion = page.getByRole("status");
+    const overText = `was moved over droppable area ${overId}.`;
+    await expect(async () => {
+      if (!(await liveRegion.textContent())?.includes(overText)) {
+        await page.keyboard.press(key);
+      }
+      await expect(liveRegion).toContainText(overText, { timeout: 1_000 });
+    }).toPass();
+    await page.keyboard.press("Space");
+    await responsePromise;
+  };
+  const backlogCards = page
+    .getByTestId("column-col-backlog")
+    .locator('[data-testid^="card-"]');
+
+  try {
+    await moveWithKeyboard("ArrowDown", "card-2");
+    await expect(backlogCards.last()).toHaveAttribute("data-testid", "card-card-1");
+
+    await moveWithKeyboard("ArrowRight", "card-3");
+    await expect(
+      page
+        .getByTestId("column-col-discovery")
+        .locator('[data-testid^="card-"]')
+        .first()
+    ).toHaveAttribute("data-testid", "card-card-1");
+    await page.reload();
+    await expect(
+      page.getByTestId("column-col-discovery").getByTestId("card-card-1")
+    ).toBeVisible();
+  } finally {
+    const cleanupResponse = await page.request.post(
+      "/api/board/cards/card-1/move",
+      { data: { target_column_id: "col-backlog", position: 0 } }
+    );
+    expect(cleanupResponse.ok()).toBeTruthy();
+  }
+});

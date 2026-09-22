@@ -30,9 +30,11 @@ class FakeProvider:
         self.response = response
         self.error = error
         self.prompts: list[str] = []
+        self.json_outputs: list[bool] = []
 
-    def complete(self, prompt: str) -> str:
+    def complete(self, prompt: str, json_output: bool = False) -> str:
         self.prompts.append(prompt)
+        self.json_outputs.append(json_output)
         if self.error:
             raise self.error
         return self.response
@@ -65,6 +67,27 @@ def test_openrouter_client_builds_expected_request_from_environment(
         "messages": [{"role": "user", "content": "2+2"}],
     }
     assert client.timeout == 7.0
+
+
+def test_openrouter_client_requests_json_output_when_asked() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"response": "ok"}'}}]},
+        )
+
+    client = OpenRouterClient(
+        api_key="test-key",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert client.complete("Board prompt", json_output=True) == '{"response": "ok"}'
+    body = json.loads(requests[0].content)
+    assert body["response_format"] == {"type": "json_object"}
+    assert body["provider"] == {"require_parameters": True}
 
 
 def test_openrouter_client_requires_an_api_key(

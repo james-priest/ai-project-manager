@@ -129,3 +129,61 @@ export const moveCard = (
   return moveCardToPosition(columns, activeId, overColumnId, position);
 };
 
+
+// Keyboard drags land exactly on a card, so use sortable (arrayMove) semantics:
+// the card takes the index of the card it was dropped on.
+export const getKeyboardDropPosition = (
+  cardIds: string[],
+  activeId: string,
+  overId: string,
+  isOverColumn: boolean
+): number => {
+  const overIndex = cardIds.indexOf(overId);
+  if (isOverColumn || overIndex === -1) {
+    return cardIds.filter((cardId) => cardId !== activeId).length;
+  }
+  return overIndex;
+};
+
+export const setColumnTitle = (
+  board: BoardData,
+  columnId: string,
+  title: string
+): BoardData => ({
+  ...board,
+  columns: board.columns.map((column) =>
+    column.id === columnId ? { ...column, title } : column
+  ),
+});
+
+export const setCard = (board: BoardData, card: Card): BoardData => ({
+  ...board,
+  cards: { ...board.cards, [card.id]: card },
+});
+
+export const removeCard = (board: BoardData, cardId: string): BoardData => ({
+  cards: Object.fromEntries(
+    Object.entries(board.cards).filter(([id]) => id !== cardId)
+  ),
+  columns: board.columns.map((column) => ({
+    ...column,
+    cardIds: column.cardIds.filter((id) => id !== cardId),
+  })),
+});
+
+export const insertCard = (
+  board: BoardData,
+  columnId: string,
+  card: Card,
+  position: number
+): BoardData => ({
+  cards: { ...board.cards, [card.id]: card },
+  columns: board.columns.map((column) => {
+    if (column.id !== columnId) {
+      return column;
+    }
+    const cardIds = column.cardIds.filter((id) => id !== card.id);
+    cardIds.splice(Math.min(position, cardIds.length), 0, card.id);
+    return { ...column, cardIds };
+  }),
+});

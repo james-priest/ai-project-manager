@@ -15,8 +15,15 @@ type KanbanCardProps = {
 };
 
 export const KanbanCard = ({ card, onEdit, onDelete }: KanbanCardProps) => {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: card.id });
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: card.id });
   const [isEditing, setIsEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(card.title);
   const [draftDetails, setDraftDetails] = useState(card.details);
@@ -64,7 +71,12 @@ export const KanbanCard = ({ card, onEdit, onDelete }: KanbanCardProps) => {
 
   return (
     <article
-      ref={setNodeRef}
+      ref={(node) => {
+        setNodeRef(node);
+        // Only keys pressed on the card itself start a keyboard drag, not
+        // Enter/Space on its buttons or edit fields.
+        setActivatorNodeRef(node);
+      }}
       style={style}
       className={clsx(
         "rounded-2xl border border-transparent bg-white px-4 py-4 shadow-[0_12px_24px_rgba(3,33,71,0.08)]",

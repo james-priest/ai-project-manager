@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -14,7 +15,6 @@ import {
   isSessionExpiredError,
   type ChatMessage,
 } from "@/lib/api";
-import type { BoardData } from "@/lib/kanban";
 import {
   clampAssistantGeometry,
   getInitialAssistantGeometry,
@@ -24,7 +24,7 @@ import {
 } from "@/lib/assistantGeometry";
 
 type AIChatSidebarProps = {
-  onBoardUpdate: (board: BoardData) => void;
+  onBoardChanged: () => void;
   onSessionExpired?: () => void;
 };
 
@@ -42,7 +42,7 @@ const getViewportSize = () => ({
 });
 
 export const AIChatSidebar = ({
-  onBoardUpdate,
+  onBoardChanged,
   onSessionExpired,
 }: AIChatSidebarProps) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -55,6 +55,13 @@ export const AIChatSidebar = ({
   const launcherRef = useRef<HTMLButtonElement>(null);
   const questionRef = useRef<HTMLTextAreaElement>(null);
   const interactionRef = useRef<PointerInteraction | null>(null);
+
+  const closeAssistant = useCallback(() => {
+    interactionRef.current = null;
+    setIsInteracting(false);
+    setIsOpen(false);
+    window.requestAnimationFrame(() => launcherRef.current?.focus());
+  }, []);
 
   useEffect(() => {
     if (!isOpen) {
@@ -72,12 +79,23 @@ export const AIChatSidebar = ({
       );
     };
 
+    // Listen on the document so Escape works even after focus leaves the
+    // non-modal dialog; skip keys an inner control already handled.
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        event.preventDefault();
+        closeAssistant();
+      }
+    };
+
     window.addEventListener("resize", handleViewportResize);
+    document.addEventListener("keydown", handleEscape);
     return () => {
       window.cancelAnimationFrame(focusFrame);
       window.removeEventListener("resize", handleViewportResize);
+      document.removeEventListener("keydown", handleEscape);
     };
-  }, [isOpen]);
+  }, [isOpen, closeAssistant]);
 
   const openAssistant = () => {
     setGeometry((currentGeometry) =>
@@ -86,13 +104,6 @@ export const AIChatSidebar = ({
         : getInitialAssistantGeometry(getViewportSize())
     );
     setIsOpen(true);
-  };
-
-  const closeAssistant = () => {
-    interactionRef.current = null;
-    setIsInteracting(false);
-    setIsOpen(false);
-    window.requestAnimationFrame(() => launcherRef.current?.focus());
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -117,7 +128,7 @@ export const AIChatSidebar = ({
     try {
       const result = await api.chat(nextQuestion, history);
       if (result.updated) {
-        onBoardUpdate(result.board);
+        onBoardChanged();
       }
       setMessages((currentMessages) => [
         ...currentMessages,
@@ -145,13 +156,6 @@ export const AIChatSidebar = ({
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
-    }
-  };
-
-  const handleDialogKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeAssistant();
     }
   };
 
@@ -279,7 +283,6 @@ export const AIChatSidebar = ({
       role="dialog"
       aria-modal="false"
       aria-labelledby="ai-assistant-title"
-      onKeyDown={handleDialogKeyDown}
       data-testid="ai-chat-sidebar"
     >
       <div
