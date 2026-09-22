@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import type { Card, Column } from "@/lib/kanban";
@@ -34,6 +34,7 @@ export const KanbanColumn = ({
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
   const [draftTitle, setDraftTitle] = useState(column.title);
   const [isSavingTitle, setIsSavingTitle] = useState(false);
+  const cancelTitleEditRef = useRef(false);
 
   useEffect(() => {
     setDraftTitle(column.title);
@@ -76,12 +77,19 @@ export const KanbanColumn = ({
           <input
             value={draftTitle}
             onChange={(event) => setDraftTitle(event.target.value)}
-            onBlur={() => void saveTitle()}
+            onBlur={() => {
+              if (cancelTitleEditRef.current) {
+                cancelTitleEditRef.current = false;
+                return;
+              }
+              void saveTitle();
+            }}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.currentTarget.blur();
               }
               if (event.key === "Escape") {
+                cancelTitleEditRef.current = true;
                 setDraftTitle(column.title);
                 event.currentTarget.blur();
               }

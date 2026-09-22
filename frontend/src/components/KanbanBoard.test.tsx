@@ -51,6 +51,24 @@ describe("KanbanBoard", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
   });
 
+  it("cancels a column rename on Escape without saving", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    renderBoard();
+    const column = getFirstColumn();
+    const input = within(column).getByLabelText("Column title");
+    const originalTitle = (input as HTMLInputElement).value;
+    await userEvent.clear(input);
+    await userEvent.type(input, "New Name{Escape}");
+    expect(input).toHaveValue(originalTitle);
+    expect(input).not.toHaveFocus();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await userEvent.click(input);
+    await userEvent.tab();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("adds and removes a card", async () => {
     const fetchMock = vi
       .fn()

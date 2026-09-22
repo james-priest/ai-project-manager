@@ -311,15 +311,11 @@ class BoardRepository:
                     if source_column_id is None:
                         raise BoardOperationError("Card not found")
 
-                    source_card_ids = column_card_ids[source_column_id]
-                    source_card_ids.remove(operation.card_id)
-                    target_card_ids = (
-                        source_card_ids
-                        if source_column_id == operation.target_column_id
-                        else column_card_ids[operation.target_column_id]
-                    )
-                    self._insert_card_at_position(
-                        target_card_ids, operation.card_id, operation.position
+                    self._move_card_id(
+                        column_card_ids[source_column_id],
+                        column_card_ids[operation.target_column_id],
+                        operation.card_id,
+                        operation.position,
                     )
                     continue
 
@@ -582,13 +578,12 @@ class BoardRepository:
 
             source_column_id = card["column_id"]
             source_ids = self._card_ids(connection, source_column_id)
-            source_ids.remove(card_id)
             target_ids = (
                 source_ids
                 if source_column_id == target_column_id
                 else self._card_ids(connection, target_column_id)
             )
-            self._insert_card_at_position(target_ids, card_id, position)
+            self._move_card_id(source_ids, target_ids, card_id, position)
 
             affected_columns = {source_column_id, target_column_id}
             self._offset_card_positions(connection, affected_columns)
@@ -659,6 +654,17 @@ class BoardRepository:
         if position > len(card_ids):
             raise BoardOperationError("Invalid card position")
         card_ids.insert(position, card_id)
+
+    @staticmethod
+    def _move_card_id(
+        source_ids: list[str], target_ids: list[str], card_id: str, position: int
+    ) -> None:
+        # Validate against the target's count before removal so a same-column
+        # move to its card count means "move to the end".
+        if position > len(target_ids):
+            raise BoardOperationError("Invalid card position")
+        source_ids.remove(card_id)
+        target_ids.insert(position, card_id)
 
     @staticmethod
     def _offset_card_positions(

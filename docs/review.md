@@ -12,11 +12,13 @@ Verification performed:
 
 Relationship to `docs/code_review.md`: most findings from that earlier review are still present in the code. They are restated here so this document stands alone; items new to this review are marked **(new)**.
 
-Overall: a clean, well-tested MVP with sound structure and correct security basics. Two confirmed bugs should be fixed; the rest are quality and robustness improvements.
+Overall: a clean, well-tested MVP with sound structure and correct security basics. Both confirmed high-severity bugs have since been fixed (see H1 and H2); the rest are quality and robustness improvements.
 
 ## High severity
 
-### H1. Moving a card to the end of its own column is rejected (AI and REST)
+### H1. Moving a card to the end of its own column is rejected (AI and REST) - FIXED
+
+- **Status: fixed.** A new `BoardRepository._move_card_id` helper validates the position against the target column's count *before* removing the card, and both `apply_operations` and `move_card` use it. A same-column move to the card count now means "move to the end", matching the prompt; larger positions are still rejected. Regression tests: `test_repository_can_move_a_card_to_the_end_of_its_own_column` and `test_apply_operations_can_move_a_card_to_the_end_of_its_own_column` in `backend/tests/test_database.py`.
 
 - `backend/app/database.py:314-323` (`apply_operations`), `backend/app/database.py:583-591` (`move_card`), `backend/app/database.py:656-661` (`_insert_card_at_position`)
 - The card is removed from its source list before the position is validated against the now-shorter list. For `col-backlog = [card-1, card-2]`, moving `card-1` to position `2` fails with `Invalid card position`.
@@ -25,7 +27,9 @@ Overall: a clean, well-tested MVP with sound structure and correct security basi
 - Reproduced: both `apply_operations` and `move_card` return `Invalid card position` for the case above.
 - Fix: pick one semantic and make both sides agree. Simplest is to clamp to `len(card_ids)` in `_insert_card_at_position` (matching the frontend), or reword the prompt to "for a move within the same column, 0 through count - 1". Add a regression test for same-column move-to-end.
 
-### H2. Pressing Escape in a column title saves the edit instead of cancelling
+### H2. Pressing Escape in a column title saves the edit instead of cancelling - FIXED
+
+- **Status: fixed.** Escape now sets a `cancelTitleEditRef` flag that makes the following `onBlur` skip `saveTitle` once. Regression test: `cancels a column rename on Escape without saving` in `frontend/src/components/KanbanBoard.test.tsx`.
 
 - `frontend/src/components/KanbanColumn.tsx:79-88`
 - The Escape handler calls `setDraftTitle(column.title)` then `blur()`. `blur()` synchronously fires `onBlur`, which runs `saveTitle` from the current render's closure where `draftTitle` is still the edited text, so the rename is committed.
@@ -111,8 +115,8 @@ Overall: a clean, well-tested MVP with sound structure and correct security basi
 
 ## Test coverage gaps
 
-1. Same-column move to `len(cards)` via both the REST route and `apply_operations` (H1).
-2. Escape-cancel in the column title editor (H2).
+1. ~~Same-column move to `len(cards)` via both the REST route and `apply_operations` (H1).~~ Added.
+2. ~~Escape-cancel in the column title editor (H2).~~ Added.
 3. `KanbanBoard.handleDragEnd`, including the move-failure rollback, has no unit coverage.
 4. Model response wrapped in a Markdown fence (M2).
 5. Chat failure followed by a retry (history shape).
