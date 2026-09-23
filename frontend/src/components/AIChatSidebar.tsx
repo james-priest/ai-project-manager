@@ -54,6 +54,7 @@ export const AIChatSidebar = ({
   const [isInteracting, setIsInteracting] = useState(false);
   const launcherRef = useRef<HTMLButtonElement>(null);
   const questionRef = useRef<HTMLTextAreaElement>(null);
+  const conversationEndRef = useRef<HTMLDivElement>(null);
   const interactionRef = useRef<PointerInteraction | null>(null);
 
   const closeAssistant = useCallback(() => {
@@ -97,6 +98,10 @@ export const AIChatSidebar = ({
     };
   }, [isOpen, closeAssistant]);
 
+  useEffect(() => {
+    conversationEndRef.current?.scrollIntoView({ block: "end" });
+  }, [messages, isSubmitting]);
+
   const openAssistant = () => {
     setGeometry((currentGeometry) =>
       currentGeometry
@@ -135,6 +140,10 @@ export const AIChatSidebar = ({
         { role: "assistant", content: result.response },
       ]);
     } catch (chatError) {
+      // Drop the unanswered question so history stays alternating, and put it
+      // back in the textarea for an easy retry.
+      setMessages((currentMessages) => currentMessages.slice(0, -1));
+      setQuestion(nextQuestion);
       if (isSessionExpiredError(chatError)) {
         onSessionExpired?.();
       } else {
@@ -348,6 +357,7 @@ export const AIChatSidebar = ({
             </div>
           ))
         )}
+        <div ref={conversationEndRef} />
       </div>
 
       {error && (

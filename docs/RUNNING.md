@@ -41,6 +41,11 @@ The application is available at [http://127.0.0.1:3000](http://127.0.0.1:3000). 
 - Authenticated `GET /api/board` returns the five-column demo board.
 - Board mutations use the authenticated API routes under `/api/board`; changes remain after restarting the container.
 - The stop command retains the named SQLite volume. Remove it only when intentionally resetting local board data.
+- The container runs as the non-root user `app` (uid 10001). A `kanban-data` volume created by an older, root-only image is not writable by that user; fix it once, with the stack stopped, before starting again:
+
+  ```bash
+  docker compose run --rm --user root --entrypoint sh app -c 'chown -R app:app /app/data'
+  ```
 
 ## Part 7 persistence checks
 

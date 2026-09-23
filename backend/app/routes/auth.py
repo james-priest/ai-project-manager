@@ -1,7 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from ..config import MVP_USERNAME, SESSION_COOKIE, SESSION_MAX_AGE
+from ..config import (
+    MVP_USERNAME,
+    SESSION_COOKIE,
+    SESSION_MAX_AGE,
+    session_cookie_is_secure,
+)
 from ..database import get_user_password_hash, verify_password
 from ..dependencies import SESSION_STORE, create_session, get_current_user
 
@@ -28,7 +33,7 @@ def login(credentials: LoginRequest, response: Response) -> dict[str, str | bool
         max_age=SESSION_MAX_AGE,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=session_cookie_is_secure(),
         path="/",
     )
     return {"authenticated": True, "username": MVP_USERNAME}

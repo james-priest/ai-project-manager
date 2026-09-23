@@ -12,7 +12,7 @@ Verification performed:
 
 Relationship to `docs/code_review.md`: most findings from that earlier review are still present in the code. They are restated here so this document stands alone; items new to this review are marked **(new)**.
 
-Overall: a clean, well-tested MVP with sound structure and correct security basics. All high- and medium-severity findings (H1, H2, M1-M7) have since been fixed; the remaining low-severity items are quality and robustness improvements.
+Overall: a clean, well-tested MVP with sound structure and correct security basics. Every finding in this review has since been fixed, except three low-severity items marked NOT FIXED (the in-memory session store's restart/multi-worker limits, a Starlette deprecation warning that needs an upstream fix, and `allowJs`, which Next.js re-adds to `tsconfig.json`).
 
 ## High severity
 
@@ -88,44 +88,47 @@ Overall: a clean, well-tested MVP with sound structure and correct security basi
 
 ## Low severity
 
+All items below are fixed except the three marked NOT FIXED.
+
 ### Backend
 
-- `backend/app/routes/ai.py:24-33,53-62` - exception-to-status mapping is duplicated across both routes, and the `except OpenRouterError` branches are unreachable (all subclasses are caught first). A single `app.exception_handler` would remove both.
-- `backend/app/database.py:430-448` - `_persist_board_state` rewrites every card on the board and bumps `updated_at` on all of them for any AI batch, so card timestamps stop meaning anything. Only write cards whose column/position/content changed. **(new)**
-- `backend/app/database.py:120-126` - `with connect(...)` on `sqlite3.Connection` commits/rolls back but does not close the connection; closing relies on garbage collection. Use `contextlib.closing` or an explicit close. **(new)**
-- `backend/app/database.py:611-615` - the `else` branch re-applies the same order to the same list already set on line 611; for same-column moves `target_ids is source_ids`. Dead weight.
-- `backend/app/main.py:24-26` - `read_index` duplicates what `StaticFiles(html=True)` already serves at `/`.
-- `backend/pyproject.toml:6-10` - `pydantic` is imported directly (`schemas.py:3`, `ai.py:3`, `routes/auth.py:2`) but not declared.
-- `backend/app/schemas.py:119-121` - no length limits on `question`, `history`, or card text; an arbitrarily large history becomes an arbitrarily large (and billed) prompt.
-- `backend/app/dependencies.py:10-30` - in-memory sessions are lost on restart and not shared across workers; expired sessions are only purged when replayed. Fine for the local MVP.
-- `backend/app/routes/auth.py:31` - `secure=False` is correct for local HTTP but must change behind TLS.
-- Test run emits a Starlette deprecation warning about `httpx` in `TestClient`; worth tracking before the next FastAPI/Starlette upgrade. **(new)**
+- FIXED (app-level `OpenRouterError` / `AIResponseError` / `LookupError` handlers in `main.py`; both AI routes are now plain calls). Was: exception-to-status mapping is duplicated across both routes, and the `except OpenRouterError` branches are unreachable (all subclasses are caught first). A single `app.exception_handler` would remove both.
+- FIXED (`_persist_board_state` writes only created, moved, or edited cards; `_park_card_positions` moves just the affected rows out of the way. Test: `test_apply_operations_only_touches_changed_cards`). Was: `_persist_board_state` rewrites every card on the board and bumps `updated_at` on all of them for any AI batch, so card timestamps stop meaning anything. Only write cards whose column/position/content changed. **(new)**
+- FIXED (every caller now uses `with closing(connect(...)) as connection, connection:`). Was: `with connect(...)` on `sqlite3.Connection` commits/rolls back but does not close the connection; closing relies on garbage collection. Use `contextlib.closing` or an explicit close. **(new)**
+- FIXED (branch removed). Was: the `else` branch re-applies the same order to the same list already set on line 611; for same-column moves `target_ids is source_ids`. Dead weight.
+- FIXED (route removed; `StaticFiles(html=True)` serves `/`). Was: `read_index` duplicates what `StaticFiles(html=True)` already serves at `/`.
+- FIXED (`pydantic>=2.9,<3` declared; `uv.lock` refreshed). Was: `pydantic` is imported directly (`schemas.py:3`, `ai.py:3`, `routes/auth.py:2`) but not declared.
+- FIXED (`MAX_TEXT_LENGTH` 2000 on every title/details/question/message, `MAX_HISTORY_MESSAGES` 50; over-limit requests get 422. Test: `test_chat_rejects_oversized_input`). Was: no length limits on `question`, `history`, or card text; an arbitrarily large history becomes an arbitrarily large (and billed) prompt.
+- NOT FIXED, except that `create_session` now purges expired entries. Restart loss and multi-worker sharing are inherent to the in-memory store and out of scope for the single-worker MVP. Was: in-memory sessions are lost on restart and not shared across workers; expired sessions are only purged when replayed. Fine for the local MVP.
+- FIXED (`session_cookie_is_secure()` reads `SESSION_COOKIE_SECURE`, defaulting to off for local HTTP). Was: `secure=False` is correct for local HTTP but must change behind TLS.
+- NOT FIXED: needs an upstream move to `httpx2` in Starlette's TestClient; nothing to change here yet. Was: test run emits a Starlette deprecation warning about `httpx` in `TestClient`; worth tracking before the next FastAPI/Starlette upgrade. **(new)**
 
 ### Frontend
 
-- `frontend/src/components/KanbanBoard.tsx:178,184` - an empty details field is persisted to the database as the literal string "No details yet." This is presentation text stored as data (and the AI will see it as real content). Store `""` and render the placeholder in `KanbanCard`. **(new)**
-- `frontend/src/components/AIChatSidebar.tsx:108-136` - on a failed request the user's question stays in `messages` with no reply, so the next request sends two consecutive `user` turns in `history`, and the question is not restored to the textarea for retry. **(new, extends earlier note)**
-- `frontend/src/components/AuthGate.tsx:51-54`, `frontend/src/components/LoginForm.tsx:23-26` - the `!authenticated` branches are dead: the backend returns 401 rather than `authenticated: false`. **(new)**
-- `frontend/src/components/AuthGate.tsx:120-127` and `KanbanBoard.tsx:270-277` - both error toasts use the same `fixed right-6 top-6` slot and overlap if shown together. **(new)**
-- `frontend/src/components/KanbanBoard.tsx:130` - a drop that does not change position still sends a move request. **(new)**
-- `frontend/src/components/KanbanCard.tsx:74-75` - dnd-kit `attributes` put `role="button"` and `tabIndex=0` on the `<article>`, which contains other buttons and, in edit mode, a form. Nested interactive roles confuse screen readers. **(new)**
-- `frontend/src/components/KanbanColumn.tsx:91` - all five title inputs share `aria-label="Column title"`; include the column name.
-- `frontend/src/components/KanbanColumn.tsx:38-40` - the effect resets `draftTitle` whenever `column.title` changes, wiping in-progress typing on an AI rename or rollback.
-- `frontend/src/components/AIChatSidebar.tsx:321-348` - the conversation does not auto-scroll to the newest message.
-- `frontend/src/components/KanbanCard.tsx:153-157` - delete has no confirmation or undo.
-- `frontend/src/lib/kanban.ts:104-130` - `moveCard` is used only by its own test.
-- `frontend/src/components/KanbanBoard.tsx:31-34` - `findColumn` duplicates `findColumnId` in `lib/kanban.ts`; per project convention it belongs in `src/lib/`.
-- `frontend/src/components/KanbanBoard.tsx:77` - `useMemo(() => board.cards, [board.cards])` is a no-op.
-- `frontend/src/components/KanbanBoard.tsx:222-230`, `NewCardForm.tsx:27-29` - failures show both a board-level toast and an in-form alert.
-- `frontend/src/components/KanbanCard.tsx:127` - card headings are `h4` directly under the page `h1`.
-- `frontend/package.json:8` - `npm start` (`next start`) does not work with `output: "export"`.
-- `frontend/tsconfig.json:5` - `allowJs: true` is unnecessary.
+- FIXED (empty details are stored as `""`; `KanbanCard` renders the placeholder. Test: `stores empty details as empty and shows a placeholder`). Was: an empty details field is persisted to the database as the literal string "No details yet." This is presentation text stored as data (and the AI will see it as real content). Store `""` and render the placeholder in `KanbanCard`. **(new)**
+- FIXED (a failed question is removed from the log and restored to the textarea. Test: `restores the question and drops the unanswered turn after a failure`). Was: on a failed request the user's question stays in `messages` with no reply, so the next request sends two consecutive `user` turns in `history`, and the question is not restored to the textarea for retry. **(new, extends earlier note)**
+- FIXED (both dead branches removed). Was: the `!authenticated` branches are dead: the backend returns 401 rather than `authenticated: false`. **(new)**
+- FIXED (the workspace toast moved to `top-20`, below the board toast). Was: both error toasts use the same `fixed right-6 top-6` slot and overlap if shown together. **(new)**
+- FIXED (a drop onto the same column and index returns early). Was: a drop that does not change position still sends a move request. **(new)**
+- FIXED (the card declares `role: "group"`, so its buttons and edit form are no longer inside a button). Was: dnd-kit `attributes` put `role="button"` and `tabIndex=0` on the `<article>`, which contains other buttons and, in edit mode, a form. Nested interactive roles confuse screen readers. **(new)**
+- FIXED (label is now `Column title: <name>`). Was: all five title inputs share `aria-label="Column title"`; include the column name.
+- FIXED (the draft is only synced while the input is not focused). Was: the effect resets `draftTitle` whenever `column.title` changes, wiping in-progress typing on an AI rename or rollback.
+- FIXED (a sentinel at the end of the log is scrolled into view when messages change). Was: the conversation does not auto-scroll to the newest message.
+- FIXED (two-step inline confirm: the trash icon becomes `Confirm delete <card>`, cancelled by Escape or blur. Test: `cancels a delete when the confirm button is dismissed`). Was: delete has no confirmation or undo.
+- FIXED (`moveCard` and `isColumnId` removed; the live `getCardDropPosition` / `moveCardToPosition` coverage was kept). Was: `moveCard` is used only by its own test.
+- FIXED (both call the exported `findCardColumn` in `lib/kanban.ts`). Was: `findColumn` duplicates `findColumnId` in `lib/kanban.ts`; per project convention it belongs in `src/lib/`.
+- FIXED (uses `board.cards` directly). Was: `useMemo(() => board.cards, [board.cards])` is a no-op.
+- FIXED (card add/edit failures report only in the form; the board toast is reserved for drag and delete). Was: failures show both a board-level toast and an in-form alert.
+- FIXED (cards use `h3` under a visually hidden per-column `h2`). Was: card headings are `h4` directly under the page `h1`.
+- FIXED (script removed). Was: `npm start` (`next start`) does not work with `output: "export"`.
+- FIXED (`src/test/vitest.d.ts` referenced `types="vitest"`, which no longer supplies the `describe`/`it`/`expect`/`vi` globals in Vitest 3; it now references `vitest/globals`, clearing 221 `tsc` errors across the test files). Was: test files had no vitest global types, so `tsc` and the IDE flagged every test.
+- NOT FIXED: removing it does not stick. Next.js rewrites `frontend/tsconfig.json` on every `next build` / `next dev` and re-adds `"allowJs": true` (it also reformats the file). Was: `allowJs: true` is unnecessary for an all-TS project.
 
 ### Packaging and repo
 
-- `Dockerfile:13` - `ghcr.io/astral-sh/uv:latest` is unpinned, so builds are not reproducible; pin a version. **(new)**
-- `Dockerfile` - the runtime container runs as root; add a non-root `USER` (the `/app/data` volume needs matching ownership). **(new)**
-- `frontend/test-results/.last-run.json` is committed even though `/test-results` is in `frontend/.gitignore`; remove it from the index with `git rm --cached`. **(new)**
+- FIXED (pinned to `uv:0.12.11`). Was: `ghcr.io/astral-sh/uv:latest` is unpinned, so builds are not reproducible; pin a version. **(new)**
+- FIXED (runs as `app`, uid 10001; verified end to end, and `docs/RUNNING.md` documents the one-time chown for volumes created by the old root-only image). Was: the runtime container runs as root; add a non-root `USER` (the `/app/data` volume needs matching ownership). **(new)**
+- FIXED (untracked with `git rm --cached`). Was: `frontend/test-results/.last-run.json` is committed even though `/test-results` is in `frontend/.gitignore`; remove it from the index with `git rm --cached`. **(new)**
 
 ## Test coverage gaps
 
@@ -134,7 +137,7 @@ Overall: a clean, well-tested MVP with sound structure and correct security basi
 3. `KanbanBoard.handleDragEnd` still has no unit coverage; the `moves cards with the keyboard` Playwright test now exercises it end to end, and the move-failure rollback remains untested.
 4. ~~Model response wrapped in a Markdown fence (M2).~~ Prevented at the source by `response_format`, so no test was added for the fenced output itself.
 5. Chat failure followed by a retry (history shape).
-6. `KanbanColumn`, `KanbanCard`, and `NewCardForm` have no direct test files.
+6. `KanbanColumn`, `KanbanCard`, and `NewCardForm` still have no direct test files; their new behavior (title-draft sync, delete confirm, empty details) is covered through `KanbanBoard.test.tsx`.
 
 ## Things done well
 

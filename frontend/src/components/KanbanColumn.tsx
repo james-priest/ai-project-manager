@@ -34,11 +34,15 @@ export const KanbanColumn = ({
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
   const [draftTitle, setDraftTitle] = useState(column.title);
   const [isSavingTitle, setIsSavingTitle] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
   const cancelTitleEditRef = useRef(false);
 
   useEffect(() => {
-    setDraftTitle(column.title);
-  }, [column.title]);
+    // Do not overwrite what the user is typing when the board updates.
+    if (!isEditingTitle) {
+      setDraftTitle(column.title);
+    }
+  }, [column.title, isEditingTitle]);
 
   const saveTitle = async () => {
     const nextTitle = draftTitle.trim();
@@ -66,6 +70,7 @@ export const KanbanColumn = ({
       )}
       data-testid={`column-${column.id}`}
     >
+      <h2 className="sr-only">{column.title}</h2>
       <div className="flex items-start justify-between gap-3">
         <div className="w-full">
           <div className="flex items-center gap-3">
@@ -77,7 +82,9 @@ export const KanbanColumn = ({
           <input
             value={draftTitle}
             onChange={(event) => setDraftTitle(event.target.value)}
+            onFocus={() => setIsEditingTitle(true)}
             onBlur={() => {
+              setIsEditingTitle(false);
               if (cancelTitleEditRef.current) {
                 cancelTitleEditRef.current = false;
                 return;
@@ -97,7 +104,7 @@ export const KanbanColumn = ({
             }}
             disabled={isSavingTitle}
             className="mt-3 w-full bg-transparent font-display text-lg font-semibold text-[var(--navy-dark)] outline-none"
-            aria-label="Column title"
+            aria-label={`Column title: ${column.title}`}
           />
         </div>
       </div>

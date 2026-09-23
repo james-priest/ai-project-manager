@@ -2,7 +2,6 @@ import {
   getCardDropPosition,
   getKeyboardDropPosition,
   insertCard,
-  moveCard,
   moveCardToPosition,
   removeCard,
   setCard,
@@ -11,28 +10,11 @@ import {
   type Column,
 } from "@/lib/kanban";
 
-describe("moveCard", () => {
+describe("pointer drops", () => {
   const baseColumns: Column[] = [
     { id: "col-a", title: "A", cardIds: ["card-1", "card-2"] },
     { id: "col-b", title: "B", cardIds: ["card-3"] },
   ];
-
-  it("reorders cards in the same column", () => {
-    const result = moveCard(baseColumns, "card-2", "card-1");
-    expect(result[0].cardIds).toEqual(["card-2", "card-1"]);
-  });
-
-  it("moves cards to another column", () => {
-    const result = moveCard(baseColumns, "card-2", "card-3");
-    expect(result[0].cardIds).toEqual(["card-1"]);
-    expect(result[1].cardIds).toEqual(["card-2", "card-3"]);
-  });
-
-  it("drops cards to the end of a column", () => {
-    const result = moveCard(baseColumns, "card-1", "col-b");
-    expect(result[0].cardIds).toEqual(["card-2"]);
-    expect(result[1].cardIds).toEqual(["card-3", "card-1"]);
-  });
 
   it("calculates a position after the last target card", () => {
     const position = getCardDropPosition(
@@ -52,6 +34,12 @@ describe("moveCard", () => {
 
     expect(result[0].cardIds).toEqual(["card-1"]);
     expect(result[1].cardIds).toEqual(["card-3", "card-2"]);
+  });
+
+  it("moves a card within its own column", () => {
+    const result = moveCardToPosition(baseColumns, "card-2", "col-a", 0);
+
+    expect(result[0].cardIds).toEqual(["card-2", "card-1"]);
   });
 });
 

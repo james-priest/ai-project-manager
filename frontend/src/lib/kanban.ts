@@ -15,15 +15,8 @@ export type BoardData = {
   cards: Record<string, Card>;
 };
 
-const isColumnId = (columns: Column[], id: string) =>
-  columns.some((column) => column.id === id);
-
-const findColumnId = (columns: Column[], id: string) => {
-  if (isColumnId(columns, id)) {
-    return id;
-  }
-  return columns.find((column) => column.cardIds.includes(id))?.id;
-};
+export const findCardColumn = (columns: Column[], id: string) =>
+  columns.find((column) => column.id === id || column.cardIds.includes(id));
 
 export type DropRect = {
   top: number;
@@ -63,7 +56,7 @@ export const moveCardToPosition = (
   targetColumnId: string,
   position: number
 ): Column[] => {
-  const activeColumnId = findColumnId(columns, activeId);
+  const activeColumnId = findCardColumn(columns, activeId)?.id;
   const targetColumn = columns.find((column) => column.id === targetColumnId);
 
   if (!activeColumnId || !targetColumn) {
@@ -100,35 +93,6 @@ export const moveCardToPosition = (
     return column;
   });
 };
-
-export const moveCard = (
-  columns: Column[],
-  activeId: string,
-  overId: string
-): Column[] => {
-  const activeColumnId = findColumnId(columns, activeId);
-  const overColumnId = findColumnId(columns, overId);
-
-  if (!activeColumnId || !overColumnId) {
-    return columns;
-  }
-
-  const overColumn = columns.find((column) => column.id === overColumnId);
-
-  if (!overColumn) {
-    return columns;
-  }
-
-  const isOverColumn = isColumnId(columns, overId);
-  const position = getCardDropPosition(
-    overColumn.cardIds,
-    activeId,
-    overId,
-    isOverColumn
-  );
-  return moveCardToPosition(columns, activeId, overColumnId, position);
-};
-
 
 // Keyboard drags land exactly on a card, so use sortable (arrayMove) semantics:
 // the card takes the index of the card it was dropped on.

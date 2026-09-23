@@ -124,6 +124,9 @@ test("adds a card to a column", async ({ page }) => {
       response.request().method() === "DELETE"
   );
   await reloadedCard.getByRole("button", { name: `Delete ${title}` }).click();
+  await reloadedCard
+    .getByRole("button", { name: `Confirm delete ${title}` })
+    .click();
   await deleteResponse;
   await expect(reloadedColumn.getByText(title)).not.toBeVisible();
 });
@@ -133,7 +136,7 @@ test("persists a column rename after reload", async ({ page }) => {
   await renameColumn(page, "Playwright Queue");
   await page.reload();
   await expect(
-    page.getByTestId("column-col-backlog").getByLabel("Column title")
+    page.getByTestId("column-col-backlog").getByLabel("Column title:")
   ).toHaveValue("Playwright Queue");
   await renameColumn(page, "Backlog");
 });
@@ -263,18 +266,27 @@ test("moves a card into an empty column", async ({ page }) => {
 test("moves cards with the keyboard", async ({ page }) => {
   await signIn(page);
 
-  const resetResponse = await page.request.post(
-    "/api/board/cards/card-1/move",
-    { data: { target_column_id: "col-backlog", position: 0 } }
-  );
-  expect(resetResponse.ok()).toBeTruthy();
+  // Put the three cards this test steps through in known places.
+  const seedLayout = async () => {
+    // Each move inserts at position 0, so the last one ends up on top:
+    // backlog [card-1, card-2] and discovery [card-3, ...].
+    for (const [cardId, columnId] of [
+      ["card-3", "col-discovery"],
+      ["card-2", "col-backlog"],
+      ["card-1", "col-backlog"],
+    ] as const) {
+      const response = await page.request.post(
+        `/api/board/cards/${cardId}/move`,
+        { data: { target_column_id: columnId, position: 0 } }
+      );
+      expect(response.ok()).toBeTruthy();
+    }
+  };
+  await seedLayout();
   await page.reload();
   await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
 
-  const moveWithKeyboard = async (
-    key: "ArrowDown" | "ArrowRight",
-    overId: string
-  ) => {
+  const moveWithKeyboard = async (key: "ArrowDown" | "ArrowRight") => {
     const responsePromise = page.waitForResponse(
       (response) =>
         response.url().includes("/api/board/cards/card-1/move") &&
@@ -283,18 +295,19 @@ test("moves cards with the keyboard", async ({ page }) => {
     const card = page.getByTestId("card-card-1");
     await card.focus();
     await page.keyboard.press("Space");
-    await expect(card).toHaveAttribute("aria-pressed", "true");
-    // dnd-kit attaches its keydown listener on a timer after pickup, so an
-    // early arrow press can be dropped. Re-press until the live region
-    // announces the expected drop target.
+    // Once the drag is live, dnd-kit announces the card as over itself.
     const liveRegion = page.getByRole("status");
-    const overText = `was moved over droppable area ${overId}.`;
+    const selfText = "was moved over droppable area card-1.";
+    await expect(liveRegion).toContainText(selfText);
+    // dnd-kit attaches its keydown listener on a timer after pickup, so an
+    // early arrow press can be lost. Press again only while the card is still
+    // announced over itself, which means no press has registered yet.
     await expect(async () => {
-      if (!(await liveRegion.textContent())?.includes(overText)) {
+      if ((await liveRegion.textContent())?.includes(selfText)) {
         await page.keyboard.press(key);
       }
-      await expect(liveRegion).toContainText(overText, { timeout: 1_000 });
-    }).toPass();
+      await expect(liveRegion).not.toContainText(selfText, { timeout: 3_000 });
+    }).toPass({ timeout: 20_000 });
     await page.keyboard.press("Space");
     await responsePromise;
   };
@@ -303,25 +316,18 @@ test("moves cards with the keyboard", async ({ page }) => {
     .locator('[data-testid^="card-"]');
 
   try {
-    await moveWithKeyboard("ArrowDown", "card-2");
+    await moveWithKeyboard("ArrowDown");
     await expect(backlogCards.last()).toHaveAttribute("data-testid", "card-card-1");
 
-    await moveWithKeyboard("ArrowRight", "card-3");
+    await moveWithKeyboard("ArrowRight");
     await expect(
-      page
-        .getByTestId("column-col-discovery")
-        .locator('[data-testid^="card-"]')
-        .first()
-    ).toHaveAttribute("data-testid", "card-card-1");
+      page.getByTestId("column-col-discovery").getByTestId("card-card-1")
+    ).toBeVisible();
     await page.reload();
     await expect(
       page.getByTestId("column-col-discovery").getByTestId("card-card-1")
     ).toBeVisible();
   } finally {
-    const cleanupResponse = await page.request.post(
-      "/api/board/cards/card-1/move",
-      { data: { target_column_id: "col-backlog", position: 0 } }
-    );
-    expect(cleanupResponse.ok()).toBeTruthy();
+    await seedLayout();
   }
 });

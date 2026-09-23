@@ -10,7 +10,7 @@ RUN npm run build
 
 FROM python:3.13-slim AS runtime
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.11 /uv /uvx /bin/
 
 WORKDIR /app
 
@@ -25,6 +25,12 @@ ENV PATH="/app/backend/.venv/bin:$PATH"
 ENV PYTHONPATH="/app/backend"
 ENV PYTHONUNBUFFERED=1
 ENV FRONTEND_STATIC_DIR="/app/frontend-out"
+
+# Run as a non-root user; /app/data is the mount point for the SQLite volume.
+RUN useradd --uid 10001 --create-home app \
+    && mkdir -p /app/data \
+    && chown -R app:app /app
+USER app
 
 EXPOSE 8000
 

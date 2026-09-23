@@ -1,3 +1,4 @@
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ from backend.app.database import (
     password_hash,
     verify_password,
 )
-from backend.app.schemas import MoveCardOperation
+from backend.app.schemas import EditCardOperation, MoveCardOperation
 
 
 def test_initialize_creates_and_seeds_a_fresh_database(tmp_path: Path) -> None:
@@ -213,3 +214,38 @@ def test_failed_mutation_rolls_back_all_order_changes(
         repository.move_card("user", "card-1", "col-review", 0)
 
     assert repository.get_board("user") == before
+
+
+def test_apply_operations_only_touches_changed_cards(tmp_path: Path) -> None:
+    database_path = tmp_path / "kanban.db"
+    initialize_database(database_path)
+    repository = BoardRepository(database_path)
+
+    def card_timestamps() -> dict[str, str]:
+        with closing(connect(database_path)) as connection:
+            return {
+                row["id"]: row["updated_at"]
+                for row in connection.execute(
+                    "SELECT id, updated_at FROM cards"
+                ).fetchall()
+            }
+
+    before = card_timestamps()
+    repository.apply_operations(
+        "user",
+        [
+            EditCardOperation(
+                operation="edit_card",
+                card_id="card-7",
+                title="Ship marketing page v2",
+                details="",
+            )
+        ],
+    )
+    after = card_timestamps()
+
+    assert after["card-7"] != before["card-7"]
+    unchanged = {card_id: stamp for card_id, stamp in after.items() if card_id != "card-7"}
+    assert unchanged == {
+        card_id: stamp for card_id, stamp in before.items() if card_id != "card-7"
+    }

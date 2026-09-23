@@ -191,6 +191,40 @@ describe("AIChatSidebar", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Open workspace assistant" })).toHaveFocus());
   });
 
+  it("restores the question and drops the unanswered turn after a failure", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        json: async () => ({ detail: "OpenRouter returned an error response." }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => chatResult("Here you go."),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<AIChatSidebar onBoardChanged={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
+
+    const input = screen.getByRole("textbox", { name: "Your question" });
+    await user.type(input, "Summarize the board.{Enter}");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "OpenRouter returned an error response."
+    );
+    expect(input).toHaveValue("Summarize the board.");
+    expect(screen.queryByTestId("chat-message-user")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText("Here you go.");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      question: "Summarize the board.",
+      history: [],
+    });
+  });
+
   it("closes on Escape even when focus has moved outside the assistant", async () => {
     const user = userEvent.setup();
     render(

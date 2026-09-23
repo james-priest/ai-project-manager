@@ -23,11 +23,17 @@ export const KanbanCard = ({ card, onEdit, onDelete }: KanbanCardProps) => {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: card.id });
+  } = useSortable({
+    id: card.id,
+    // The card holds buttons and, while editing, a form, so it is a group
+    // rather than dnd-kit's default role of button.
+    attributes: { role: "group" },
+  });
   const [isEditing, setIsEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(card.title);
   const [draftDetails, setDraftDetails] = useState(card.details);
   const [isSaving, setIsSaving] = useState(false);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const style = {
@@ -36,6 +42,7 @@ export const KanbanCard = ({ card, onEdit, onDelete }: KanbanCardProps) => {
   };
 
   const startEditing = () => {
+    setIsConfirmingDelete(false);
     setDraftTitle(card.title);
     setDraftDetails(card.details);
     setError(null);
@@ -136,9 +143,9 @@ export const KanbanCard = ({ card, onEdit, onDelete }: KanbanCardProps) => {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-start gap-2">
-              <h4 className="min-w-0 flex-1 break-words font-display text-base font-semibold text-[var(--navy-dark)]">
+              <h3 className="min-w-0 flex-1 break-words font-display text-base font-semibold text-[var(--navy-dark)]">
                 {card.title}
-              </h4>
+              </h3>
               <div className="flex shrink-0 items-center gap-1">
                 <button
                   type="button"
@@ -162,31 +169,52 @@ export const KanbanCard = ({ card, onEdit, onDelete }: KanbanCardProps) => {
                     <path d="m13.75 6.75 3.5 3.5M3.25 20.75l3.5-3.5" />
                   </svg>
                 </button>
-                <button
-                  type="button"
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={() => void onDelete(card.id)}
-                  className="flex h-7 w-7 items-center justify-center rounded-full border border-transparent text-[var(--gray-text)] transition hover:border-[var(--stroke)] hover:text-[var(--navy-dark)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-blue)]"
-                  aria-label={`Delete ${card.title}`}
-                  title={`Delete ${card.title}`}
-                >
-                  <svg
-                    aria-hidden="true"
-                    className="h-4 w-4"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
+                {isConfirmingDelete ? (
+                  <button
+                    type="button"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={() => void onDelete(card.id)}
+                    onBlur={() => setIsConfirmingDelete(false)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setIsConfirmingDelete(false);
+                      }
+                    }}
+                    autoFocus
+                    className="rounded-full border border-red-300 px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-wide text-red-700 transition hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-[var(--primary-blue)]"
+                    aria-label={`Confirm delete ${card.title}`}
+                    title={`Confirm delete ${card.title}`}
                   >
-                    <path d="M4.5 7.5h15M9 4.5h6l1 3H8zM7 7.5l.75 12h8.5L17 7.5M10 11v5M14 11v5" />
-                  </svg>
-                </button>
+                    Confirm
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={() => setIsConfirmingDelete(true)}
+                    className="flex h-7 w-7 items-center justify-center rounded-full border border-transparent text-[var(--gray-text)] transition hover:border-[var(--stroke)] hover:text-[var(--navy-dark)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-blue)]"
+                    aria-label={`Delete ${card.title}`}
+                    title={`Delete ${card.title}`}
+                  >
+                    <svg
+                      aria-hidden="true"
+                      className="h-4 w-4"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M4.5 7.5h15M9 4.5h6l1 3H8zM7 7.5l.75 12h8.5L17 7.5M10 11v5M14 11v5" />
+                    </svg>
+                  </button>
+                )}
               </div>
             </div>
             <p className="mt-2 text-sm leading-6 text-[var(--gray-text)]">
-              {card.details}
+              {card.details || "No details yet."}
             </p>
           </div>
         </div>

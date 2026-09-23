@@ -25,9 +25,13 @@ class AIConnectivityResponse(BaseModel):
     response: str
 
 
+MAX_TEXT_LENGTH = 2_000
+MAX_HISTORY_MESSAGES = 50
+
+
 class ConversationMessage(BaseModel):
     role: Literal["user", "assistant"]
-    content: str
+    content: str = Field(max_length=MAX_TEXT_LENGTH)
 
     @field_validator("content")
     @classmethod
@@ -42,8 +46,8 @@ class CreateCardOperation(BaseModel):
     operation: Literal["create_card"]
     column_id: str = Field(min_length=1)
     position: int = Field(ge=0)
-    title: str
-    details: str = ""
+    title: str = Field(max_length=MAX_TEXT_LENGTH)
+    details: str = Field(default="", max_length=MAX_TEXT_LENGTH)
 
     @field_validator("column_id")
     @classmethod
@@ -70,8 +74,8 @@ class CreateCardOperation(BaseModel):
 class EditCardOperation(BaseModel):
     operation: Literal["edit_card"]
     card_id: str = Field(min_length=1)
-    title: str
-    details: str = ""
+    title: str = Field(max_length=MAX_TEXT_LENGTH)
+    details: str = Field(default="", max_length=MAX_TEXT_LENGTH)
 
     @field_validator("card_id")
     @classmethod
@@ -117,8 +121,10 @@ BoardOperation = Annotated[
 
 
 class AIChatRequest(BaseModel):
-    question: str
-    history: list[ConversationMessage] = Field(default_factory=list)
+    question: str = Field(max_length=MAX_TEXT_LENGTH)
+    history: list[ConversationMessage] = Field(
+        default_factory=list, max_length=MAX_HISTORY_MESSAGES
+    )
 
     @field_validator("question")
     @classmethod
@@ -149,7 +155,7 @@ class AIChatResponse(BaseModel):
 
 
 class RenameColumnRequest(BaseModel):
-    title: str
+    title: str = Field(max_length=MAX_TEXT_LENGTH)
 
     @field_validator("title")
     @classmethod
@@ -162,8 +168,8 @@ class RenameColumnRequest(BaseModel):
 
 class CreateCardRequest(BaseModel):
     column_id: str = Field(min_length=1)
-    title: str
-    details: str = ""
+    title: str = Field(max_length=MAX_TEXT_LENGTH)
+    details: str = Field(default="", max_length=MAX_TEXT_LENGTH)
 
     @field_validator("title")
     @classmethod
@@ -180,8 +186,8 @@ class CreateCardRequest(BaseModel):
 
 
 class UpdateCardRequest(BaseModel):
-    title: str
-    details: str = ""
+    title: str = Field(max_length=MAX_TEXT_LENGTH)
+    details: str = Field(default="", max_length=MAX_TEXT_LENGTH)
 
     @field_validator("title")
     @classmethod

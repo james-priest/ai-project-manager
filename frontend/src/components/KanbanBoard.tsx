@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -20,6 +20,7 @@ import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { AIChatSidebar } from "@/components/AIChatSidebar";
 import { api, getApiErrorMessage, isSessionExpiredError } from "@/lib/api";
 import {
+  findCardColumn,
   getCardDropPosition,
   getKeyboardDropPosition,
   insertCard,
@@ -36,11 +37,6 @@ type KanbanBoardProps = {
   isLoggingOut?: boolean;
   onSessionExpired?: () => void;
 };
-
-const findColumn = (board: BoardData, id: string) =>
-  board.columns.find(
-    (column) => column.id === id || column.cardIds.includes(id)
-  );
 
 // Keyboard drags have no pointer coordinates, which pointerWithin needs.
 const collisionDetection: CollisionDetection = (args) =>
@@ -66,8 +62,6 @@ export const KanbanBoard = ({
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
-
-  const cardsById = useMemo(() => board.cards, [board.cards]);
 
   const trackMutation = <T,>(request: Promise<T>): Promise<T> => {
     mutationCount.current += 1;
@@ -122,8 +116,8 @@ export const KanbanBoard = ({
 
     const activeId = String(active.id);
     const overId = String(over.id);
-    const activeColumn = findColumn(board, activeId);
-    const targetColumn = findColumn(board, overId);
+    const activeColumn = findCardColumn(board.columns, activeId);
+    const targetColumn = findCardColumn(board.columns, overId);
     if (!activeColumn || !targetColumn) {
       return;
     }
@@ -150,6 +144,10 @@ export const KanbanBoard = ({
           );
 
     const originalPosition = activeColumn.cardIds.indexOf(activeId);
+    if (targetColumn.id === activeColumn.id && position === originalPosition) {
+      return;
+    }
+
     setMutationError(null);
     setBoard((prev) => ({
       ...prev,
@@ -178,7 +176,7 @@ export const KanbanBoard = ({
   };
 
   const handleRenameColumn = async (columnId: string, title: string) => {
-    const previousTitle = findColumn(board, columnId)?.title ?? title;
+    const previousTitle = findCardColumn(board.columns, columnId)?.title ?? title;
     setMutationError(null);
     setBoard((prev) => setColumnTitle(prev, columnId, title));
 
@@ -198,18 +196,16 @@ export const KanbanBoard = ({
     setMutationError(null);
     try {
       const { id } = await trackMutation(
-        api.createCard(columnId, title, details || "No details yet.")
+        api.createCard(columnId, title, details)
       );
       setBoard((prev) =>
-        insertCard(
-          prev,
-          columnId,
-          { id, title, details: details || "No details yet." },
-          Infinity
-        )
+        insertCard(prev, columnId, { id, title, details }, Infinity)
       );
     } catch (error) {
-      handleMutationError(error, "Unable to add card. Please try again.");
+      // The form shows its own message; only session expiry needs the board.
+      if (isSessionExpiredError(error)) {
+        onSessionExpired?.();
+      }
       throw error;
     }
   };
@@ -227,7 +223,10 @@ export const KanbanBoard = ({
       await trackMutation(api.updateCard(cardId, title, details));
     } catch (error) {
       setBoard((prev) => setCard(prev, previousCard));
-      handleMutationError(error, "Unable to save card. Please try again.");
+      // The card's edit form shows its own message.
+      if (isSessionExpiredError(error)) {
+        onSessionExpired?.();
+      }
       throw error;
     }
   };
@@ -235,7 +234,7 @@ export const KanbanBoard = ({
   const handleDeleteCard = async (columnId: string, cardId: string) => {
     const previousCard = board.cards[cardId];
     const previousPosition =
-      findColumn(board, columnId)?.cardIds.indexOf(cardId) ?? 0;
+      findCardColumn(board.columns, columnId)?.cardIds.indexOf(cardId) ?? 0;
     setMutationError(null);
     setBoard((prev) => removeCard(prev, cardId));
 
@@ -249,7 +248,7 @@ export const KanbanBoard = ({
     }
   };
 
-  const activeCard = activeCardId ? cardsById[activeCardId] : null;
+  const activeCard = activeCardId ? board.cards[activeCardId] : null;
 
   return (
     <div className="relative overflow-hidden">

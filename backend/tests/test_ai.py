@@ -270,6 +270,22 @@ def test_invalid_model_output_does_not_change_board(
     assert client.get("/api/board").json() == before
 
 
+def test_chat_rejects_oversized_input(client: TestClient) -> None:
+    login(client)
+
+    too_long = client.post("/api/ai/chat", json={"question": "x" * 2_001})
+    too_much_history = client.post(
+        "/api/ai/chat",
+        json={
+            "question": "Summarize.",
+            "history": [{"role": "user", "content": "hi"}] * 51,
+        },
+    )
+
+    assert too_long.status_code == 422
+    assert too_much_history.status_code == 422
+
+
 def test_chat_maps_provider_errors(client: TestClient) -> None:
     provider = FakeProvider(
         "",

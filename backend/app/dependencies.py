@@ -11,6 +11,14 @@ SESSION_STORE: dict[str, float] = {}
 
 
 def create_session() -> str:
+    now = time.time()
+    for expired_id in [
+        session_id
+        for session_id, expires_at in SESSION_STORE.items()
+        if expires_at <= now
+    ]:
+        SESSION_STORE.pop(expired_id, None)
+
     session_id = secrets.token_urlsafe(32)
     SESSION_STORE[session_id] = time.time() + SESSION_MAX_AGE
     return session_id

@@ -19,12 +19,8 @@ export const LoginForm = ({ onAuthenticated }: LoginFormProps) => {
     setError(null);
 
     try {
+      // Bad credentials come back as a 401, handled below.
       const data = await api.login(username, password);
-      if (!data.authenticated) {
-        setError("Invalid username or password.");
-        return;
-      }
-
       await onAuthenticated(data.username);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {

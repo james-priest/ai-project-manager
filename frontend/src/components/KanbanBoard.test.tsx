@@ -43,7 +43,7 @@ describe("KanbanBoard", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderBoard();
     const column = getFirstColumn();
-    const input = within(column).getByLabelText("Column title");
+    const input = within(column).getByLabelText(/Column title/);
     await userEvent.clear(input);
     await userEvent.type(input, "New Name");
     await userEvent.tab();
@@ -56,7 +56,7 @@ describe("KanbanBoard", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderBoard();
     const column = getFirstColumn();
-    const input = within(column).getByLabelText("Column title");
+    const input = within(column).getByLabelText(/Column title/);
     const originalTitle = (input as HTMLInputElement).value;
     await userEvent.clear(input);
     await userEvent.type(input, "New Name{Escape}");
@@ -97,10 +97,12 @@ describe("KanbanBoard", () => {
 
     expect(await within(column).findByText("New card")).toBeInTheDocument();
 
-    const deleteButton = within(column).getByRole("button", {
-      name: /delete new card/i,
-    });
-    await userEvent.click(deleteButton);
+    await userEvent.click(
+      within(column).getByRole("button", { name: "Delete New card" })
+    );
+    await userEvent.click(
+      within(column).getByRole("button", { name: "Confirm delete New card" })
+    );
 
     await waitFor(() =>
       expect(within(column).queryByText("New card")).not.toBeInTheDocument()
@@ -139,7 +141,14 @@ describe("KanbanBoard", () => {
     renderBoard();
 
     const card = screen.getByTestId("card-card-1");
-    await userEvent.click(within(card).getByRole("button", { name: /delete/i }));
+    await userEvent.click(
+      within(card).getByRole("button", { name: "Delete Align roadmap themes" })
+    );
+    await userEvent.click(
+      within(card).getByRole("button", {
+        name: "Confirm delete Align roadmap themes",
+      })
+    );
 
     expect(await screen.findByText("Align roadmap themes")).toBeInTheDocument();
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -147,9 +156,54 @@ describe("KanbanBoard", () => {
     );
   });
 
+  it("stores empty details as empty and shows a placeholder", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: "card-new" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderBoard();
+    const column = getFirstColumn();
+
+    await userEvent.click(within(column).getByRole("button", { name: /add a card/i }));
+    await userEvent.type(
+      within(column).getByPlaceholderText(/card title/i),
+      "Detail free"
+    );
+    await userEvent.click(within(column).getByRole("button", { name: /add card/i }));
+
+    await within(column).findByText("Detail free");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      column_id: "col-backlog",
+      title: "Detail free",
+      details: "",
+    });
+    expect(
+      within(screen.getByTestId("card-card-new")).getByText("No details yet.")
+    ).toBeInTheDocument();
+  });
+
+  it("cancels a delete when the confirm button is dismissed", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    renderBoard();
+
+    const card = screen.getByTestId("card-card-1");
+    await userEvent.click(
+      within(card).getByRole("button", { name: "Delete Align roadmap themes" })
+    );
+    await userEvent.keyboard("{Escape}");
+
+    expect(
+      within(card).getByRole("button", { name: "Delete Align roadmap themes" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("Align roadmap themes")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rolls back only the failed change when mutations overlap", async () => {
     let rejectDelete: (error: Error) => void = () => {};
-    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
       if (init?.method === "DELETE") {
         return new Promise((_, reject) => {
           rejectDelete = reject;
@@ -161,10 +215,17 @@ describe("KanbanBoard", () => {
     renderBoard();
 
     const card = screen.getByTestId("card-card-1");
-    await userEvent.click(within(card).getByRole("button", { name: /delete/i }));
+    await userEvent.click(
+      within(card).getByRole("button", { name: "Delete Align roadmap themes" })
+    );
+    await userEvent.click(
+      within(card).getByRole("button", {
+        name: "Confirm delete Align roadmap themes",
+      })
+    );
     expect(screen.queryByText("Align roadmap themes")).not.toBeInTheDocument();
 
-    const input = within(getFirstColumn()).getByLabelText("Column title");
+    const input = within(getFirstColumn()).getByLabelText(/Column title/);
     await userEvent.clear(input);
     await userEvent.type(input, "Renamed{Enter}");
     await waitFor(() =>
@@ -180,9 +241,9 @@ describe("KanbanBoard", () => {
     expect(
       within(getFirstColumn()).getAllByTestId(/card-/).map((node) => node.dataset.testid)
     ).toEqual(["card-card-1", "card-card-2"]);
-    // The header lists column titles from board state; the rename must survive.
-    expect(screen.getByText("Renamed")).toBeInTheDocument();
-    expect(screen.queryByText("Backlog")).not.toBeInTheDocument();
+    // Column titles render from board state, so the rename must survive.
+    expect(screen.getAllByText("Renamed").length).toBeGreaterThan(0);
+    expect(screen.queryAllByText("Backlog")).toHaveLength(0);
   });
 
   it("reloads the board after an assistant update once pending edits settle", async () => {
@@ -217,7 +278,14 @@ describe("KanbanBoard", () => {
     renderBoard();
 
     const card = screen.getByTestId("card-card-1");
-    await user.click(within(card).getByRole("button", { name: /delete/i }));
+    await user.click(
+      within(card).getByRole("button", { name: "Delete Align roadmap themes" })
+    );
+    await user.click(
+      within(card).getByRole("button", {
+        name: "Confirm delete Align roadmap themes",
+      })
+    );
 
     await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
     await user.type(screen.getByRole("textbox", { name: "Your question" }), "Edit card 2{Enter}");
@@ -251,7 +319,14 @@ describe("KanbanBoard", () => {
     );
 
     const card = screen.getByTestId("card-card-1");
-    await userEvent.click(within(card).getByRole("button", { name: /delete/i }));
+    await userEvent.click(
+      within(card).getByRole("button", { name: "Delete Align roadmap themes" })
+    );
+    await userEvent.click(
+      within(card).getByRole("button", {
+        name: "Confirm delete Align roadmap themes",
+      })
+    );
 
     await waitFor(() => expect(onSessionExpired).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();

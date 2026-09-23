@@ -47,12 +47,8 @@ export const AuthGate = () => {
     setError(null);
 
     try {
-      const currentUser = await api.getCurrentUser();
-      if (!currentUser.authenticated) {
-        setWorkspaceState("unauthenticated");
-        return;
-      }
-
+      // An unauthenticated caller gets a 401, handled by handleLoadError.
+      await api.getCurrentUser();
       setBoard(await api.getBoard());
       setWorkspaceState("authenticated");
     } catch (loadError) {
@@ -120,7 +116,7 @@ export const AuthGate = () => {
       {error && workspaceState === "authenticated" && (
         <p
           role="alert"
-          className="fixed right-6 top-6 z-10 rounded-xl bg-red-100 px-4 py-3 text-sm font-semibold text-red-800 shadow-lg"
+          className="fixed right-6 top-20 z-10 rounded-xl bg-red-100 px-4 py-3 text-sm font-semibold text-red-800 shadow-lg"
         >
           {error}
         </p>
