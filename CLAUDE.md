@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-A Project Management MVP: a Kanban board app with an AI chat assistant that can create/edit/move cards. Single hardcoded user (`user`/`password`), one board per user, runs locally in Docker. See `docs/PLAN.md` for the incremental build plan this repo was implemented against (the git history follows "Part N" commits matching plan phases) and `docs/DATABASE.md` / `docs/database-schema.json` for the approved SQLite schema.
+A project management app: Kanban boards with an AI chat assistant that can create/edit/move cards. Self-service accounts (the seeded demo account is `user`/`password`), multiple boards per user, runs locally in Docker. `docs/ROADMAP.md` tracks the phased build-out beyond the original MVP. See `docs/PLAN.md` for the incremental build plan this repo was implemented against (the git history follows "Part N" commits matching plan phases) and `docs/DATABASE.md` / `docs/database-schema.json` for the approved SQLite schema.
 
 ## Architecture
 
@@ -17,10 +17,10 @@ Request flow: browser loads the static SPA from FastAPI → `AuthGate` (frontend
 
 Backend module boundaries (`backend/app/`):
 - `main.py` — creates the `FastAPI` app, wires the lifespan (DB init) and static-file serving, includes the route modules. No business logic.
-- `config.py` — environment-derived settings: database path resolution, static-dir resolution (`FRONTEND_STATIC_DIR` vs. the placeholder), session cookie name/lifetime, the hardcoded MVP username.
-- `dependencies.py` — shared FastAPI dependencies: `get_current_user` (session-cookie auth, backed by the in-memory `SESSION_STORE`, not persisted), `create_session`, `get_board_repository`, `get_ai_provider`.
-- `routes/` — one router module per resource: `health.py`, `auth.py` (login/logout/me/example), `board.py` (board CRUD), `ai.py` (connectivity + chat). Routes depend on `dependencies.py`, never construct repositories/providers inline.
-- `database.py` — SQLite schema init/seed and `BoardRepository` (all board reads/mutations; enforces ownership and ordering, rewrites affected positions in one transaction per mutation via a shared `_insert_card_at_position` helper).
+- `config.py` — environment-derived settings: database path resolution, static-dir resolution (`FRONTEND_STATIC_DIR` vs. the placeholder), session cookie name/lifetime, and whether the session cookie is marked secure.
+- `dependencies.py` — shared FastAPI dependencies: `get_current_user` (session-cookie auth backed by the `sessions` table), `get_session_repository`, `get_user_repository`, `get_board_repository`, `get_ai_provider`.
+- `routes/` — one router module per resource: `health.py`, `auth.py` (register/login/logout/me/example), `boards.py` (board list/create/read/rename/delete), `board.py` (cards and columns of the user's first board), `ai.py` (connectivity + chat). Routes depend on `dependencies.py`, never construct repositories/providers inline.
+- `database.py` — SQLite schema init/migration/seed, `UserRepository`, `SessionRepository`, and `BoardRepository` (all board reads/mutations; enforces ownership and ordering, rewrites affected positions in one transaction per mutation via a shared `_insert_card_at_position` helper).
 - `ai.py` — builds the AI prompt from board state, strictly parses/validates the model's response into board operations, applies them via `BoardRepository`.
 - `openrouter.py` — `AIProvider` interface and `OpenRouterClient` implementation (model: `openai/gpt-oss-120b`), translates transport/provider errors into typed exceptions (`OpenRouterConfigurationError`, `OpenRouterTimeoutError`, `OpenRouterProviderError`) that the route modules map to HTTP status codes.
 - `schemas.py` — Pydantic request/response models shared by routes.

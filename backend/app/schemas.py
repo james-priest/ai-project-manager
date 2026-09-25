@@ -2,6 +2,9 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, Field, field_validator
 
+MAX_TEXT_LENGTH = 2_000
+MAX_HISTORY_MESSAGES = 50
+
 
 class CardData(BaseModel):
     id: str
@@ -20,13 +23,41 @@ class BoardData(BaseModel):
     cards: dict[str, CardData]
 
 
+class BoardSummary(BaseModel):
+    id: str
+    title: str
+    cardCount: int
+    updatedAt: str
+
+
+class CreateBoardRequest(BaseModel):
+    title: str = Field(max_length=MAX_TEXT_LENGTH)
+
+    @field_validator("title")
+    @classmethod
+    def title_must_not_be_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("title must not be blank")
+        return value
+
+
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=50)
+    password: str = Field(min_length=8, max_length=200)
+
+    @field_validator("username")
+    @classmethod
+    def username_must_be_simple(cls, value: str) -> str:
+        value = value.strip()
+        if not value.replace("-", "").replace("_", "").isalnum():
+            raise ValueError("username may only contain letters, numbers, - and _")
+        return value.lower()
+
+
 class AIConnectivityResponse(BaseModel):
     prompt: str
     response: str
-
-
-MAX_TEXT_LENGTH = 2_000
-MAX_HISTORY_MESSAGES = 50
 
 
 class ConversationMessage(BaseModel):

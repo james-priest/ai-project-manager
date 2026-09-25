@@ -1,9 +1,11 @@
-import time
-
 from fastapi.testclient import TestClient
 
 from backend.app.config import SESSION_COOKIE
-from backend.app.dependencies import SESSION_STORE, create_session
+from backend.app.dependencies import get_session_repository
+
+
+def sessions():
+    return get_session_repository()
 
 
 def login(client: TestClient) -> str:
@@ -88,7 +90,7 @@ def test_logout_invalidates_session_and_clears_cookie(client: TestClient) -> Non
 
     assert response.status_code == 200
     assert response.json() == {"authenticated": False}
-    assert session_id not in SESSION_STORE
+    assert sessions().get_username(session_id) is None
     assert client.get("/api/auth/me").status_code == 401
     assert "max-age=0" in response.headers["set-cookie"].lower()
 
@@ -97,9 +99,10 @@ def test_unknown_and_expired_sessions_are_rejected(client: TestClient) -> None:
     client.cookies.set(SESSION_COOKIE, "unknown-session")
     assert client.get("/api/auth/me").status_code == 401
 
-    session_id = create_session()
-    SESSION_STORE[session_id] = time.time() - 1
+    session_id = sessions().create("user", max_age_seconds=-1)
+    assert session_id is not None
     client.cookies.set(SESSION_COOKIE, session_id)
 
     assert client.get("/api/auth/me").status_code == 401
-    assert session_id not in SESSION_STORE
+    # An expired session is dropped when it is replayed.
+    assert sessions().get_username(session_id) is None

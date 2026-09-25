@@ -3,12 +3,13 @@ import hmac
 import secrets
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .config import get_database_path
 from .schemas import (
     BoardData,
+    BoardSummary,
     BoardOperation,
     CardData,
     ColumnData,
@@ -142,8 +143,9 @@ def initialize_database(database_path: Path | None = None) -> None:
 
             CREATE TABLE IF NOT EXISTS boards (
                 id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL UNIQUE,
+                user_id TEXT NOT NULL,
                 title TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0),
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -171,9 +173,64 @@ def initialize_database(database_path: Path | None = None) -> None:
                 UNIQUE (column_id, position),
                 FOREIGN KEY (column_id) REFERENCES columns(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
             """
         )
+        migrate_database(connection)
         seed_initial_data(connection)
+
+
+def migrate_database(connection: sqlite3.Connection) -> None:
+    """Bring a database created by an earlier schema up to date."""
+    boards_sql = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'boards'"
+    ).fetchone()
+    if boards_sql is None:
+        return
+
+    if "user_id TEXT NOT NULL UNIQUE" in boards_sql["sql"]:
+        # SQLite cannot drop a constraint, so rebuild the table without it.
+        # Child rows in columns/cards point at boards, so foreign keys have to
+        # be off while the parent table is swapped (and off means outside a
+        # transaction, which executescript's implicit commit gives us).
+        connection.execute("PRAGMA foreign_keys = OFF")
+        connection.executescript(
+            """
+            CREATE TABLE boards_migrated (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            INSERT INTO boards_migrated (id, user_id, title, created_at, updated_at)
+            SELECT id, user_id, title, created_at, updated_at FROM boards;
+
+            DROP TABLE boards;
+            ALTER TABLE boards_migrated RENAME TO boards;
+            """
+        )
+        connection.execute("PRAGMA foreign_keys = ON")
+        return
+
+    columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(boards)").fetchall()
+    }
+    if "position" not in columns:
+        connection.execute(
+            "ALTER TABLE boards ADD COLUMN position INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def seed_initial_data(connection: sqlite3.Connection) -> None:
@@ -193,14 +250,14 @@ def seed_initial_data(connection: sqlite3.Connection) -> None:
 
     connection.execute(
         """
-        INSERT INTO boards (id, user_id, title)
-        VALUES (?, ?, ?)
-        ON CONFLICT(user_id) DO NOTHING
+        INSERT INTO boards (id, user_id, title, position)
+        VALUES (?, ?, ?, 0)
+        ON CONFLICT(id) DO NOTHING
         """,
         ("board-user-1", user["id"], "Kanban Studio"),
     )
     board = connection.execute(
-        "SELECT id FROM boards WHERE user_id = ?", (user["id"],)
+        "SELECT id FROM boards WHERE id = ?", ("board-user-1",)
     ).fetchone()
     if board is None:
         return
@@ -230,6 +287,122 @@ def seed_initial_data(connection: sqlite3.Connection) -> None:
     )
 
 
+class UserExistsError(ValueError):
+    """Raised when a username is already registered."""
+
+
+DEFAULT_BOARD_TITLE = "My board"
+
+
+class UserRepository:
+    def __init__(self, database_path: Path | None = None) -> None:
+        self.database_path = database_path or get_database_path()
+
+    def create_user(self, username: str, password: str) -> str:
+        """Create a user with a starter board. Returns the new user id."""
+        with closing(connect(self.database_path)) as connection, connection:
+            existing = connection.execute(
+                "SELECT 1 FROM users WHERE username = ?", (username,)
+            ).fetchone()
+            if existing is not None:
+                raise UserExistsError("That username is already taken.")
+
+            user_id = f"user-{secrets.token_hex(8)}"
+            connection.execute(
+                """
+                INSERT INTO users (id, username, password_hash, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (user_id, username, password_hash(password), utc_now()),
+            )
+            _insert_board(connection, user_id, DEFAULT_BOARD_TITLE, 0)
+            return user_id
+
+    def authenticate(self, username: str, password: str) -> bool:
+        with closing(connect(self.database_path)) as connection, connection:
+            row = connection.execute(
+                "SELECT password_hash FROM users WHERE username = ?", (username,)
+            ).fetchone()
+        return row is not None and verify_password(password, row["password_hash"])
+
+
+class SessionRepository:
+    """Sessions live in SQLite so they survive a restart."""
+
+    def __init__(self, database_path: Path | None = None) -> None:
+        self.database_path = database_path or get_database_path()
+
+    def create(self, username: str, max_age_seconds: int) -> str | None:
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=max_age_seconds)
+        with closing(connect(self.database_path)) as connection, connection:
+            user = connection.execute(
+                "SELECT id FROM users WHERE username = ?", (username,)
+            ).fetchone()
+            if user is None:
+                return None
+
+            connection.execute(
+                "DELETE FROM sessions WHERE expires_at <= ?", (utc_now(),)
+            )
+            session_id = secrets.token_urlsafe(32)
+            connection.execute(
+                """
+                INSERT INTO sessions (id, user_id, expires_at, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (session_id, user["id"], expires_at.isoformat(), utc_now()),
+            )
+            return session_id
+
+    def get_username(self, session_id: str) -> str | None:
+        with closing(connect(self.database_path)) as connection, connection:
+            row = connection.execute(
+                """
+                SELECT users.username, sessions.expires_at
+                FROM sessions
+                JOIN users ON users.id = sessions.user_id
+                WHERE sessions.id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            if row["expires_at"] <= utc_now():
+                connection.execute(
+                    "DELETE FROM sessions WHERE id = ?", (session_id,)
+                )
+                return None
+            return row["username"]
+
+    def delete(self, session_id: str) -> None:
+        with closing(connect(self.database_path)) as connection, connection:
+            connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+
+
+def _insert_board(
+    connection: sqlite3.Connection, user_id: str, title: str, position: int
+) -> str:
+    board_id = f"board-{secrets.token_hex(8)}"
+    connection.execute(
+        """
+        INSERT INTO boards (id, user_id, title, position, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (board_id, user_id, title, position, utc_now(), utc_now()),
+    )
+    connection.executemany(
+        """
+        INSERT INTO columns (id, board_id, title, position)
+        VALUES (?, ?, ?, ?)
+        """,
+        [
+            (f"col-{secrets.token_hex(8)}", board_id, title, position)
+            for _, title, position in INITIAL_COLUMNS
+        ],
+    )
+    return board_id
+
+
 class BoardOperationError(ValueError):
     """Raised when a batch contains an invalid board operation."""
 
@@ -240,6 +413,107 @@ class BoardRepository:
 
     def initialize(self) -> None:
         initialize_database(self.database_path)
+
+    def list_boards(self, username: str) -> list[BoardSummary]:
+        with closing(connect(self.database_path)) as connection, connection:
+            rows = connection.execute(
+                """
+                SELECT boards.id, boards.title, boards.updated_at,
+                       COUNT(cards.id) AS card_count
+                FROM boards
+                JOIN users ON users.id = boards.user_id
+                LEFT JOIN columns ON columns.board_id = boards.id
+                LEFT JOIN cards ON cards.column_id = columns.id
+                WHERE users.username = ?
+                GROUP BY boards.id
+                ORDER BY boards.position, boards.created_at
+                """,
+                (username,),
+            ).fetchall()
+        return [
+            BoardSummary(
+                id=row["id"],
+                title=row["title"],
+                cardCount=row["card_count"],
+                updatedAt=row["updated_at"],
+            )
+            for row in rows
+        ]
+
+    def create_board(self, username: str, title: str) -> BoardSummary | None:
+        with closing(connect(self.database_path)) as connection, connection:
+            user = connection.execute(
+                "SELECT id FROM users WHERE username = ?", (username,)
+            ).fetchone()
+            if user is None:
+                return None
+
+            next_position = connection.execute(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM boards WHERE user_id = ?",
+                (user["id"],),
+            ).fetchone()[0]
+            board_id = _insert_board(connection, user["id"], title, next_position)
+            return BoardSummary(
+                id=board_id, title=title, cardCount=0, updatedAt=utc_now()
+            )
+
+    def rename_board(self, username: str, board_id: str, title: str) -> bool:
+        with closing(connect(self.database_path)) as connection, connection:
+            result = connection.execute(
+                """
+                UPDATE boards
+                SET title = ?, updated_at = ?
+                WHERE id = ?
+                  AND user_id = (SELECT id FROM users WHERE username = ?)
+                """,
+                (title, utc_now(), board_id, username),
+            )
+            return result.rowcount == 1
+
+    def delete_board(self, username: str, board_id: str) -> bool:
+        with closing(connect(self.database_path)) as connection, connection:
+            owned = connection.execute(
+                """
+                SELECT boards.id
+                FROM boards
+                JOIN users ON users.id = boards.user_id
+                WHERE boards.id = ? AND users.username = ?
+                """,
+                (board_id, username),
+            ).fetchone()
+            if owned is None:
+                return False
+
+            # A user always keeps at least one board to land on.
+            remaining = connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM boards
+                JOIN users ON users.id = boards.user_id
+                WHERE users.username = ?
+                """,
+                (username,),
+            ).fetchone()[0]
+            if remaining <= 1:
+                return False
+
+            connection.execute("DELETE FROM boards WHERE id = ?", (board_id,))
+            return True
+
+    def get_board_by_id(self, username: str, board_id: str) -> BoardData | None:
+        with closing(connect(self.database_path)) as connection, connection:
+            board = connection.execute(
+                """
+                SELECT boards.id
+                FROM boards
+                JOIN users ON users.id = boards.user_id
+                WHERE boards.id = ? AND users.username = ?
+                """,
+                (board_id, username),
+            ).fetchone()
+            if board is None:
+                return None
+            return self._board_data(connection, board)
 
     def get_board(self, username: str) -> BoardData | None:
         with closing(connect(self.database_path)) as connection, connection:
@@ -626,6 +900,8 @@ class BoardRepository:
             FROM boards
             JOIN users ON users.id = boards.user_id
             WHERE users.username = ?
+            ORDER BY boards.position, boards.created_at
+            LIMIT 1
             """,
             (username,),
         ).fetchone()

@@ -13,7 +13,7 @@ from .openrouter import (
     OpenRouterError,
     OpenRouterTimeoutError,
 )
-from .routes import ai, auth, board, health
+from .routes import ai, auth, board, boards, health
 
 STATIC_DIR = get_static_dir()
 
@@ -55,6 +55,7 @@ def handle_missing_board(_: Request, error: LookupError) -> JSONResponse:
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(board.router)
+app.include_router(boards.router)
 app.include_router(ai.router)
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="frontend")

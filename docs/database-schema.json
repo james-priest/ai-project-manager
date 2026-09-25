@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "purpose": "SQLite storage design for the Project Management MVP",
   "storage": {
     "engine": "SQLite",
@@ -40,7 +40,7 @@
     },
     {
       "name": "boards",
-      "purpose": "One Kanban board per user for the MVP",
+      "purpose": "Kanban boards; a user may own several",
       "columns": [
         {
           "name": "id",
@@ -53,13 +53,20 @@
           "type": "TEXT",
           "nullable": false,
           "references": "users.id",
-          "on_delete": "CASCADE",
-          "unique": true
+          "on_delete": "CASCADE"
         },
         {
           "name": "title",
           "type": "TEXT",
           "nullable": false
+        },
+        {
+          "name": "position",
+          "type": "INTEGER",
+          "nullable": false,
+          "default": 0,
+          "check": "position >= 0",
+          "purpose": "Order of the board in the owner's board list"
         },
         {
           "name": "created_at",
@@ -173,6 +180,43 @@
       "constraints": [
         "UNIQUE(column_id, position)"
       ]
+    },
+    {
+      "name": "sessions",
+      "purpose": "Login sessions, persisted so they survive a restart",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": true
+        },
+        {
+          "name": "user_id",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "expires_at",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "references": "users(id)",
+          "on_delete": "CASCADE"
+        }
+      ]
     }
   ],
   "relationships": [
@@ -193,7 +237,9 @@
         {
           "id": "string",
           "title": "string",
-          "cardIds": ["string"]
+          "cardIds": [
+            "string"
+          ]
         }
       ],
       "cards": {

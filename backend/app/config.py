@@ -7,7 +7,6 @@ DEFAULT_DATABASE_PATH = BACKEND_DIR / "data" / "kanban.db"
 PLACEHOLDER_STATIC_DIR = BACKEND_DIR / "static"
 EXPORTED_STATIC_DIR = Path(os.getenv("FRONTEND_STATIC_DIR", "/app/frontend-out"))
 
-MVP_USERNAME = "user"
 SESSION_COOKIE = "session_id"
 SESSION_MAX_AGE = 60 * 60 * 8
 
