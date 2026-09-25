@@ -168,6 +168,13 @@ def test_repository_rejects_other_users_and_unknown_resources(
         )
         connection.execute(
             """
+            INSERT INTO board_members (board_id, user_id, role)
+            VALUES (?, ?, 'owner')
+            """,
+            ("board-user-2", "user-2"),
+        )
+        connection.execute(
+            """
             INSERT INTO columns (id, board_id, title, position)
             VALUES (?, ?, ?, ?)
             """,

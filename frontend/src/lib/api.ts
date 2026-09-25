@@ -1,4 +1,10 @@
-import type { BoardData } from "@/lib/kanban";
+import type { BoardData, Label, LabelColor } from "@/lib/kanban";
+
+export type CardFields = {
+  dueDate: string | null;
+  assignee: string;
+  labelIds: string[];
+};
 
 export type AuthResponse = {
   authenticated: boolean;
@@ -7,6 +13,34 @@ export type AuthResponse = {
 
 export type CardMutationResponse = {
   id: string;
+};
+
+export type BoardSummary = {
+  id: string;
+  title: string;
+  cardCount: number;
+  updatedAt: string;
+  role: "owner" | "editor";
+  memberCount: number;
+};
+
+export type BoardMember = {
+  username: string;
+  role: "owner" | "editor";
+};
+
+export type Comment = {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+};
+
+export type ActivityEntry = {
+  id: string;
+  actor: string;
+  summary: string;
+  createdAt: string;
 };
 
 export type ChatMessage = {
@@ -19,6 +53,16 @@ export type AIChatResponse = {
   board: BoardData;
   updated: boolean;
 };
+
+export const emptyCardFields: CardFields = {
+  dueDate: null,
+  assignee: "",
+  labelIds: [],
+};
+
+// Optimistic local cards start with no comments; the server count arrives
+// with the next board load.
+export const newCardDefaults = { ...emptyCardFields, commentCount: 0 };
 
 export class ApiError extends Error {
   status: number;
@@ -65,6 +109,13 @@ const jsonRequest = <T>(path: string, body: unknown, method: string) =>
 export const api = {
   getCurrentUser: () => request<AuthResponse>("/api/auth/me"),
 
+  register: (username: string, password: string) =>
+    jsonRequest<AuthResponse>(
+      "/api/auth/register",
+      { username, password },
+      "POST"
+    ),
+
   login: (username: string, password: string) =>
     jsonRequest<AuthResponse>(
       "/api/auth/login",
@@ -74,7 +125,25 @@ export const api = {
 
   logout: () => request<{ authenticated: false }>("/api/auth/logout", { method: "POST" }),
 
-  getBoard: () => request<BoardData>("/api/board"),
+  listBoards: () => request<BoardSummary[]>("/api/boards"),
+
+  createBoard: (title: string) =>
+    jsonRequest<BoardSummary>("/api/boards", { title }, "POST"),
+
+  renameBoard: (boardId: string, title: string) =>
+    jsonRequest<{ updated: true }>(
+      `/api/boards/${encodeURIComponent(boardId)}`,
+      { title },
+      "PATCH"
+    ),
+
+  deleteBoard: (boardId: string) =>
+    request<{ deleted: true }>(`/api/boards/${encodeURIComponent(boardId)}`, {
+      method: "DELETE",
+    }),
+
+  getBoard: (boardId: string) =>
+    request<BoardData>(`/api/boards/${encodeURIComponent(boardId)}`),
 
   renameColumn: (columnId: string, title: string) =>
     jsonRequest<{ updated: true }>(
@@ -83,18 +152,99 @@ export const api = {
       "PATCH"
     ),
 
-  createCard: (columnId: string, title: string, details: string) =>
+  createCard: (
+    columnId: string,
+    title: string,
+    details: string,
+    fields: CardFields = emptyCardFields
+  ) =>
     jsonRequest<CardMutationResponse>(
       "/api/board/cards",
-      { column_id: columnId, title, details },
+      {
+        column_id: columnId,
+        title,
+        details,
+        due_date: fields.dueDate,
+        assignee: fields.assignee,
+        label_ids: fields.labelIds,
+      },
       "POST"
     ),
 
-  updateCard: (cardId: string, title: string, details: string) =>
+  updateCard: (
+    cardId: string,
+    title: string,
+    details: string,
+    fields: CardFields = emptyCardFields
+  ) =>
     jsonRequest<{ updated: true }>(
       `/api/board/cards/${encodeURIComponent(cardId)}`,
-      { title, details },
+      {
+        title,
+        details,
+        due_date: fields.dueDate,
+        assignee: fields.assignee,
+        label_ids: fields.labelIds,
+      },
       "PATCH"
+    ),
+
+  listMembers: (boardId: string) =>
+    request<BoardMember[]>(
+      `/api/boards/${encodeURIComponent(boardId)}/members`
+    ),
+
+  addMember: (boardId: string, username: string) =>
+    jsonRequest<BoardMember>(
+      `/api/boards/${encodeURIComponent(boardId)}/members`,
+      { username },
+      "POST"
+    ),
+
+  removeMember: (boardId: string, username: string) =>
+    request<{ removed: true }>(
+      `/api/boards/${encodeURIComponent(boardId)}/members/${encodeURIComponent(
+        username
+      )}`,
+      { method: "DELETE" }
+    ),
+
+  listActivity: (boardId: string) =>
+    request<ActivityEntry[]>(
+      `/api/boards/${encodeURIComponent(boardId)}/activity`
+    ),
+
+  listComments: (cardId: string) =>
+    request<Comment[]>(
+      `/api/board/cards/${encodeURIComponent(cardId)}/comments`
+    ),
+
+  addComment: (cardId: string, body: string) =>
+    jsonRequest<Comment>(
+      `/api/board/cards/${encodeURIComponent(cardId)}/comments`,
+      { body },
+      "POST"
+    ),
+
+  deleteComment: (commentId: string) =>
+    request<{ deleted: true }>(
+      `/api/board/comments/${encodeURIComponent(commentId)}`,
+      { method: "DELETE" }
+    ),
+
+  createLabel: (boardId: string, name: string, color: LabelColor) =>
+    jsonRequest<Label>(
+      `/api/boards/${encodeURIComponent(boardId)}/labels`,
+      { name, color },
+      "POST"
+    ),
+
+  deleteLabel: (boardId: string, labelId: string) =>
+    request<{ deleted: true }>(
+      `/api/boards/${encodeURIComponent(boardId)}/labels/${encodeURIComponent(
+        labelId
+      )}`,
+      { method: "DELETE" }
     ),
 
   deleteCard: (cardId: string) =>
@@ -110,10 +260,10 @@ export const api = {
       "POST"
     ),
 
-  chat: (question: string, history: ChatMessage[]) =>
+  chat: (question: string, history: ChatMessage[], boardId: string) =>
     jsonRequest<AIChatResponse>(
       "/api/ai/chat",
-      { question, history },
+      { question, history, board_id: boardId },
       "POST"
     ),
 };

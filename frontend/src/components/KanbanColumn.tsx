@@ -2,13 +2,17 @@ import clsx from "clsx";
 import { useEffect, useRef, useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import type { Card, Column } from "@/lib/kanban";
+import type { CardFields } from "@/lib/api";
+import type { Card, Column, Label } from "@/lib/kanban";
 import { KanbanCard } from "@/components/KanbanCard";
 import { NewCardForm } from "@/components/NewCardForm";
 
 type KanbanColumnProps = {
   column: Column;
   cards: Card[];
+  labels: Label[];
+  today: string;
+  onCommentsChanged: () => void;
   onRename: (columnId: string, title: string) => void | Promise<void>;
   onAddCard: (
     columnId: string,
@@ -18,7 +22,8 @@ type KanbanColumnProps = {
   onEditCard: (
     cardId: string,
     title: string,
-    details: string
+    details: string,
+    fields: CardFields
   ) => void | Promise<void>;
   onDeleteCard: (columnId: string, cardId: string) => void | Promise<void>;
 };
@@ -26,6 +31,9 @@ type KanbanColumnProps = {
 export const KanbanColumn = ({
   column,
   cards,
+  labels,
+  today,
+  onCommentsChanged,
   onRename,
   onAddCard,
   onEditCard,
@@ -114,6 +122,9 @@ export const KanbanColumn = ({
             <KanbanCard
               key={card.id}
               card={card}
+              labels={labels}
+              today={today}
+              onCommentsChanged={onCommentsChanged}
               onEdit={onEditCard}
               onDelete={(cardId) => onDeleteCard(column.id, cardId)}
             />

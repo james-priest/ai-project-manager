@@ -13,13 +13,13 @@ Two apps combined into one Docker image:
 - **`frontend/`** — Next.js 16 (App Router, React 19, TypeScript, Tailwind CSS 4, `@dnd-kit`). Built with `output: "export"`, producing a static `out/` directory — there is no Next.js server at runtime.
 - **`backend/`** — FastAPI app (`backend/app/main.py`) that serves the exported static frontend at `/` and exposes the JSON API under `/api/*`. In Docker, `FRONTEND_STATIC_DIR` points at the copied `out/`; when that directory has no `index.html` (e.g. backend-only local dev), it falls back to the placeholder at `backend/static/index.html`.
 
-Request flow: browser loads the static SPA from FastAPI → `AuthGate` (frontend) checks `/api/auth/me` → on success, board loads via `src/lib/api.ts` from `/api/board` → all board mutations (rename column, create/update/delete/move card) go through same-origin `/api/board/*` routes and are persisted immediately to SQLite → the AI sidebar posts to `/api/ai/chat`, and if the response has `updated: true`, the frontend reloads the board.
+Request flow: browser loads the static SPA from FastAPI → `AuthGate` (frontend) lists boards via `/api/boards` (a 401 shows `LoginForm`, which also registers accounts) → the active board loads from `/api/boards/{board_id}` → card and column mutations go through same-origin `/api/board/*` routes and are persisted immediately to SQLite → the AI sidebar posts to `/api/ai/chat` with the active `board_id`, and if the response has `updated: true`, the frontend reloads the board.
 
 Backend module boundaries (`backend/app/`):
 - `main.py` — creates the `FastAPI` app, wires the lifespan (DB init) and static-file serving, includes the route modules. No business logic.
 - `config.py` — environment-derived settings: database path resolution, static-dir resolution (`FRONTEND_STATIC_DIR` vs. the placeholder), session cookie name/lifetime, and whether the session cookie is marked secure.
 - `dependencies.py` — shared FastAPI dependencies: `get_current_user` (session-cookie auth backed by the `sessions` table), `get_session_repository`, `get_user_repository`, `get_board_repository`, `get_ai_provider`.
-- `routes/` — one router module per resource: `health.py`, `auth.py` (register/login/logout/me/example), `boards.py` (board list/create/read/rename/delete), `board.py` (cards and columns of the user's first board), `ai.py` (connectivity + chat). Routes depend on `dependencies.py`, never construct repositories/providers inline.
+- `routes/` — one router module per resource: `health.py`, `auth.py` (register/login/logout/me/example), `boards.py` (board CRUD, labels, members, activity), `board.py` (cards, columns, comments), `ai.py` (connectivity + chat). Routes depend on `dependencies.py`, never construct repositories/providers inline.
 - `database.py` — SQLite schema init/migration/seed, `UserRepository`, `SessionRepository`, and `BoardRepository` (all board reads/mutations; enforces ownership and ordering, rewrites affected positions in one transaction per mutation via a shared `_insert_card_at_position` helper).
 - `ai.py` — builds the AI prompt from board state, strictly parses/validates the model's response into board operations, applies them via `BoardRepository`.
 - `openrouter.py` — `AIProvider` interface and `OpenRouterClient` implementation (model: `openai/gpt-oss-120b`), translates transport/provider errors into typed exceptions (`OpenRouterConfigurationError`, `OpenRouterTimeoutError`, `OpenRouterProviderError`) that the route modules map to HTTP status codes.
@@ -29,9 +29,9 @@ The API always returns/consumes the full `BoardData` shape (columns with ordered
 
 Frontend module boundaries (`frontend/src/`):
 - `app/` — layout, page (renders `AuthGate`), global styles.
-- `components/` — `KanbanBoard` (holds working board state), column/card/drag-preview/new-card components, `AIChatSidebar` (fixed launcher + draggable/resizable chat dialog, sends request-scoped conversation history).
-- `lib/kanban.ts` — pure `Card`/`Column`/`BoardData` types and board transform functions; keep board logic here, not in components.
-- `lib/api.ts` — typed same-origin API client (auth + board).
+- `components/` — `AuthGate` (owns the board list, active board, and session state), `LoginForm` (sign in or register), `BoardSwitcher` (select/create/rename/delete boards), `BoardToolbar` (search, label filters, label management), `KanbanBoard` (holds working board state), `CardLabel`, column/card/drag-preview/new-card components, `AIChatSidebar` (fixed launcher + draggable/resizable chat dialog, sends request-scoped conversation history).
+- `lib/kanban.ts` — pure `Card`/`Column`/`Label`/`BoardData` types, board transforms, and the `filterBoard` search/label filter; keep board logic here, not in components.
+- `lib/api.ts` — typed same-origin API client (auth, boards, board contents, AI chat).
 
 ## Commands
 
@@ -78,6 +78,6 @@ Playwright: set `PLAYWRIGHT_BASE_URL` to target an already-running server instea
 - Keep it simple: never over-engineer, no unnecessary defensive programming, no speculative features. Use latest/idiomatic library versions.
 - When debugging, find the root cause before applying a fix — don't guess.
 - No emojis, anywhere.
-- Backend: keep persistent board behavior in `BoardRepository`, not in routes. Keep auth/ownership checks server-side — never trust a client-supplied user ID. Tests must use temporary SQLite databases, never the developer's local DB. Never log `OPENROUTER_API_KEY`.
+- Backend: keep persistent board behavior in `BoardRepository`, not in routes. Keep auth/ownership checks server-side — never trust a client-supplied user ID. Board access goes through `board_members`; owner-only actions check `role = 'owner'`. Tests must use temporary SQLite databases, never the developer's local DB. Never log `OPENROUTER_API_KEY`.
 - Frontend: keep board transform logic in `src/lib/`, not in component render logic. Use accessible labels/roles on controls (both users and Playwright tests rely on them). Add unit/component tests for new behavior and Playwright coverage for new end-to-end journeys.
 - Visual system colors (`frontend/src/app/globals.css`): accent yellow `#ecad0a`, blue `#209dd7`, purple `#753991` (submit/important actions), navy `#032147` (headings), gray `#888888` (supporting text).

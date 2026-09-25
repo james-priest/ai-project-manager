@@ -24,6 +24,7 @@ import {
 } from "@/lib/assistantGeometry";
 
 type AIChatSidebarProps = {
+  boardId: string;
   onBoardChanged: () => void;
   onSessionExpired?: () => void;
 };
@@ -42,6 +43,7 @@ const getViewportSize = () => ({
 });
 
 export const AIChatSidebar = ({
+  boardId,
   onBoardChanged,
   onSessionExpired,
 }: AIChatSidebarProps) => {
@@ -131,7 +133,7 @@ export const AIChatSidebar = ({
     setIsSubmitting(true);
 
     try {
-      const result = await api.chat(nextQuestion, history);
+      const result = await api.chat(nextQuestion, history, boardId);
       if (result.updated) {
         onBoardChanged();
       }

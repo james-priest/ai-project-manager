@@ -39,14 +39,14 @@ describe("api client", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await api.getBoard();
+    await api.getBoard("board-1");
     await api.renameColumn("col/backlog", "Queue");
     await api.createCard("col-backlog", "New card", "Notes");
     await api.updateCard("card/1", "Updated", "Details");
     await api.deleteCard("card/1");
     await api.moveCard("card/1", "col-review", 2);
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/board", {
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/boards/board-1", {
       credentials: "same-origin",
     });
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -63,6 +63,9 @@ describe("api client", () => {
           column_id: "col-backlog",
           title: "New card",
           details: "Notes",
+          due_date: null,
+          assignee: "",
+          label_ids: [],
         }),
       })
     );
@@ -94,7 +97,7 @@ describe("api client", () => {
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(detailResponse));
 
-    await expect(api.getBoard()).rejects.toEqual(
+    await expect(api.getBoard("board-1")).rejects.toEqual(
       expect.objectContaining({
         name: "ApiError",
         message: "Card not found",
@@ -110,7 +113,7 @@ describe("api client", () => {
       },
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(emptyResponse));
-    await expect(api.getBoard()).rejects.toEqual(
+    await expect(api.getBoard("board-1")).rejects.toEqual(
       expect.objectContaining({
         message: "Request failed with status 503.",
         status: 503,
@@ -121,6 +124,28 @@ describe("api client", () => {
       "Bad request"
     );
     expect(getApiErrorMessage(new Error("offline"), "Fallback")).toBe("Fallback");
+  });
+
+  it("maps board list operations to the backend routes", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: "board-9" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.listBoards();
+    await api.createBoard("Launch plan");
+    await api.renameBoard("board/9", "Launch");
+    await api.deleteBoard("board/9");
+    await api.register("ada", "hunter2pass");
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init.method])).toEqual([
+      ["/api/boards", undefined],
+      ["/api/boards", "POST"],
+      ["/api/boards/board%2F9", "PATCH"],
+      ["/api/boards/board%2F9", "DELETE"],
+      ["/api/auth/register", "POST"],
+    ]);
   });
 
   it("sends the chat question and request-scoped history", async () => {
@@ -139,7 +164,9 @@ describe("api client", () => {
       { role: "user" as const, content: "Summarize the board." },
       { role: "assistant" as const, content: "Review is next." },
     ];
-    await expect(api.chat("What should we prioritize?", history)).resolves.toEqual(
+    await expect(
+      api.chat("What should we prioritize?", history, "board-1")
+    ).resolves.toEqual(
       chatResponse
     );
 
@@ -149,6 +176,7 @@ describe("api client", () => {
       body: JSON.stringify({
         question: "What should we prioritize?",
         history,
+        board_id: "board-1",
       }),
       credentials: "same-origin",
     });

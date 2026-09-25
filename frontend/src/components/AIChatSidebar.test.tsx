@@ -17,7 +17,7 @@ describe("AIChatSidebar", () => {
   });
 
   it("shows an empty conversation and validates a blank question", async () => {
-    render(<AIChatSidebar onBoardChanged={vi.fn()} />);
+    render(<AIChatSidebar boardId="board-1" onBoardChanged={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: "Open workspace assistant" })).toBeInTheDocument();
     await userEvent.click(
@@ -38,7 +38,7 @@ describe("AIChatSidebar", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
-    render(<AIChatSidebar onBoardChanged={vi.fn()} />);
+    render(<AIChatSidebar boardId="board-1" onBoardChanged={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
 
     const input = screen.getByRole("textbox", { name: "Your question" });
@@ -47,7 +47,11 @@ describe("AIChatSidebar", () => {
 
     expect(await screen.findByText("Focus on the review queue.")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/ai/chat", expect.objectContaining({
-      body: JSON.stringify({ question: "What should we prioritize?", history: [] }),
+      body: JSON.stringify({
+        question: "What should we prioritize?",
+        history: [],
+        board_id: "board-1",
+      }),
     }));
     expect(screen.getByText("What should we prioritize?")).toBeInTheDocument();
   });
@@ -76,7 +80,7 @@ describe("AIChatSidebar", () => {
     vi.stubGlobal("fetch", fetchMock);
     const onBoardChanged = vi.fn();
     const user = userEvent.setup();
-    render(<AIChatSidebar onBoardChanged={onBoardChanged} />);
+    render(<AIChatSidebar boardId="board-1" onBoardChanged={onBoardChanged} />);
     await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
 
     const input = screen.getByRole("textbox", { name: "Your question" });
@@ -98,6 +102,7 @@ describe("AIChatSidebar", () => {
             { role: "user", content: "Summarize the board." },
             { role: "assistant", content: "The review queue is next." },
           ],
+          board_id: "board-1",
         }),
       })
     );
@@ -113,7 +118,7 @@ describe("AIChatSidebar", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
-    render(<AIChatSidebar onBoardChanged={vi.fn()} />);
+    render(<AIChatSidebar boardId="board-1" onBoardChanged={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
 
     const input = screen.getByRole("textbox", { name: "Your question" });
@@ -132,7 +137,7 @@ describe("AIChatSidebar", () => {
   it("reports a provider error", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     const user = userEvent.setup();
-    render(<AIChatSidebar onBoardChanged={vi.fn()} />);
+    render(<AIChatSidebar boardId="board-1" onBoardChanged={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
 
     await user.type(
@@ -158,7 +163,7 @@ describe("AIChatSidebar", () => {
     const onSessionExpired = vi.fn();
     const user = userEvent.setup();
     render(
-      <AIChatSidebar onBoardChanged={vi.fn()} onSessionExpired={onSessionExpired} />
+      <AIChatSidebar boardId="board-1" onBoardChanged={vi.fn()} onSessionExpired={onSessionExpired} />
     );
     await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
 
@@ -174,7 +179,7 @@ describe("AIChatSidebar", () => {
 
   it("opens as a dialog, focuses the question, and restores launcher focus on close", async () => {
     const user = userEvent.setup();
-    render(<AIChatSidebar onBoardChanged={vi.fn()} />);
+    render(<AIChatSidebar boardId="board-1" onBoardChanged={vi.fn()} />);
 
     const launcher = screen.getByRole("button", {
       name: "Open workspace assistant",
@@ -205,7 +210,7 @@ describe("AIChatSidebar", () => {
       });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
-    render(<AIChatSidebar onBoardChanged={vi.fn()} />);
+    render(<AIChatSidebar boardId="board-1" onBoardChanged={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
 
     const input = screen.getByRole("textbox", { name: "Your question" });
@@ -222,6 +227,7 @@ describe("AIChatSidebar", () => {
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
       question: "Summarize the board.",
       history: [],
+      board_id: "board-1",
     });
   });
 
@@ -230,7 +236,7 @@ describe("AIChatSidebar", () => {
     render(
       <>
         <button type="button">Board control</button>
-        <AIChatSidebar onBoardChanged={vi.fn()} />
+        <AIChatSidebar boardId="board-1" onBoardChanged={vi.fn()} />
       </>
     );
     await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
@@ -247,11 +253,16 @@ describe("AIChatSidebar", () => {
     render(
       <>
         <input aria-label="Handles escape" onKeyDown={(event) => event.preventDefault()} />
-        <AIChatSidebar onBoardChanged={vi.fn()} />
+        <AIChatSidebar boardId="board-1" onBoardChanged={vi.fn()} />
       </>
     );
     await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    // Opening focuses the question box on a frame; wait for that before moving
+    // focus away, or the pending focus can steal the Escape key back.
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "Your question" })).toHaveFocus()
+    );
 
     await user.click(screen.getByRole("textbox", { name: "Handles escape" }));
     await user.keyboard("{Escape}");
@@ -277,7 +288,7 @@ describe("AIChatSidebar", () => {
     });
 
     const user = userEvent.setup();
-    render(<AIChatSidebar onBoardChanged={vi.fn()} />);
+    render(<AIChatSidebar boardId="board-1" onBoardChanged={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Open workspace assistant" }));
 
     const dialog = screen.getByRole("dialog");

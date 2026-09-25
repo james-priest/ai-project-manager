@@ -2,19 +2,39 @@ import { useState, type FormEvent } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import clsx from "clsx";
-import type { Card } from "@/lib/kanban";
+import { CardComments } from "@/components/CardComments";
+import { CardLabel } from "@/components/CardLabel";
+import type { CardFields } from "@/lib/api";
+import { isOverdue, type Card, type Label } from "@/lib/kanban";
 
 type KanbanCardProps = {
   card: Card;
+  labels: Label[];
+  today: string;
+  onCommentsChanged: () => void;
   onEdit: (
     cardId: string,
     title: string,
-    details: string
+    details: string,
+    fields: CardFields
   ) => void | Promise<void>;
   onDelete: (cardId: string) => void | Promise<void>;
 };
 
-export const KanbanCard = ({ card, onEdit, onDelete }: KanbanCardProps) => {
+const cardFieldsOf = (card: Card): CardFields => ({
+  dueDate: card.dueDate,
+  assignee: card.assignee,
+  labelIds: card.labelIds,
+});
+
+export const KanbanCard = ({
+  card,
+  labels,
+  today,
+  onCommentsChanged,
+  onEdit,
+  onDelete,
+}: KanbanCardProps) => {
   const {
     attributes,
     listeners,
@@ -32,6 +52,7 @@ export const KanbanCard = ({ card, onEdit, onDelete }: KanbanCardProps) => {
   const [isEditing, setIsEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(card.title);
   const [draftDetails, setDraftDetails] = useState(card.details);
+  const [draftFields, setDraftFields] = useState<CardFields>(cardFieldsOf(card));
   const [isSaving, setIsSaving] = useState(false);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,11 +61,13 @@ export const KanbanCard = ({ card, onEdit, onDelete }: KanbanCardProps) => {
     transform: CSS.Transform.toString(transform),
     transition,
   };
+  const cardLabels = labels.filter((label) => card.labelIds.includes(label.id));
 
   const startEditing = () => {
     setIsConfirmingDelete(false);
     setDraftTitle(card.title);
     setDraftDetails(card.details);
+    setDraftFields(cardFieldsOf(card));
     setError(null);
     setIsEditing(true);
   };
@@ -52,8 +75,18 @@ export const KanbanCard = ({ card, onEdit, onDelete }: KanbanCardProps) => {
   const cancelEditing = () => {
     setDraftTitle(card.title);
     setDraftDetails(card.details);
+    setDraftFields(cardFieldsOf(card));
     setError(null);
     setIsEditing(false);
+  };
+
+  const toggleLabel = (labelId: string) => {
+    setDraftFields((current) => ({
+      ...current,
+      labelIds: current.labelIds.includes(labelId)
+        ? current.labelIds.filter((id) => id !== labelId)
+        : [...current.labelIds, labelId],
+    }));
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -67,7 +100,10 @@ export const KanbanCard = ({ card, onEdit, onDelete }: KanbanCardProps) => {
     setIsSaving(true);
     setError(null);
     try {
-      await onEdit(card.id, title, draftDetails.trim());
+      await onEdit(card.id, title, draftDetails.trim(), {
+        ...draftFields,
+        assignee: draftFields.assignee.trim(),
+      });
       setIsEditing(false);
     } catch {
       setError("Unable to save card. Please try again.");
@@ -116,6 +152,63 @@ export const KanbanCard = ({ card, onEdit, onDelete }: KanbanCardProps) => {
             className="w-full resize-none rounded-xl border border-[var(--stroke)] bg-white px-3 py-2 text-sm text-[var(--gray-text)] outline-none transition focus:border-[var(--primary-blue)]"
             disabled={isSaving}
           />
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--gray-text)]">
+              Due date
+              <input
+                type="date"
+                value={draftFields.dueDate ?? ""}
+                onChange={(event) =>
+                  setDraftFields((current) => ({
+                    ...current,
+                    dueDate: event.target.value || null,
+                  }))
+                }
+                aria-label={`Due date for ${card.title}`}
+                disabled={isSaving}
+                className="mt-1 w-full rounded-xl border border-[var(--stroke)] bg-white px-2 py-1 text-xs font-medium normal-case tracking-normal text-[var(--navy-dark)] outline-none"
+              />
+            </label>
+            <label className="text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--gray-text)]">
+              Assignee
+              <input
+                value={draftFields.assignee}
+                onChange={(event) =>
+                  setDraftFields((current) => ({
+                    ...current,
+                    assignee: event.target.value,
+                  }))
+                }
+                aria-label={`Assignee for ${card.title}`}
+                disabled={isSaving}
+                className="mt-1 w-full rounded-xl border border-[var(--stroke)] bg-white px-2 py-1 text-xs font-medium normal-case tracking-normal text-[var(--navy-dark)] outline-none"
+              />
+            </label>
+          </div>
+          {labels.length > 0 && (
+            <fieldset className="space-y-1">
+              <legend className="text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--gray-text)]">
+                Labels
+              </legend>
+              <div className="flex flex-wrap gap-2">
+                {labels.map((label) => (
+                  <label
+                    key={label.id}
+                    className="flex items-center gap-1 text-xs text-[var(--navy-dark)]"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={draftFields.labelIds.includes(label.id)}
+                      onChange={() => toggleLabel(label.id)}
+                      disabled={isSaving}
+                      aria-label={`${label.name} label for ${card.title}`}
+                    />
+                    <CardLabel label={label} />
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
           <div className="flex items-center gap-2">
             <button
               type="submit"
@@ -216,7 +309,50 @@ export const KanbanCard = ({ card, onEdit, onDelete }: KanbanCardProps) => {
             <p className="mt-2 text-sm leading-6 text-[var(--gray-text)]">
               {card.details || "No details yet."}
             </p>
+            {(cardLabels.length > 0 ||
+              card.dueDate ||
+              card.assignee ||
+              card.commentCount > 0) && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {cardLabels.map((label) => (
+                  <CardLabel key={label.id} label={label} />
+                ))}
+                {card.dueDate && (
+                  <span
+                    className={clsx(
+                      "rounded-full px-2 py-0.5 text-[0.65rem] font-semibold",
+                      isOverdue(card, today)
+                        ? "bg-red-100 text-red-700"
+                        : "bg-[var(--surface)] text-[var(--gray-text)]"
+                    )}
+                  >
+                    {isOverdue(card, today) ? "Overdue " : "Due "}
+                    {card.dueDate}
+                  </span>
+                )}
+                {card.assignee && (
+                  <span className="rounded-full bg-[var(--surface)] px-2 py-0.5 text-[0.65rem] font-semibold text-[var(--navy-dark)]">
+                    {card.assignee}
+                  </span>
+                )}
+                {card.commentCount > 0 && (
+                  <span className="rounded-full bg-[var(--surface)] px-2 py-0.5 text-[0.65rem] font-semibold text-[var(--gray-text)]">
+                    {card.commentCount}{" "}
+                    {card.commentCount === 1 ? "comment" : "comments"}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
+        </div>
+      )}
+      {isEditing && (
+        <div className="mt-3" onPointerDown={(event) => event.stopPropagation()}>
+          <CardComments
+            cardId={card.id}
+            cardTitle={card.title}
+            onCommentsChanged={onCommentsChanged}
+          />
         </div>
       )}
     </article>

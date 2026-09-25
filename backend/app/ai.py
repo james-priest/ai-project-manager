@@ -75,7 +75,11 @@ def run_ai_chat(
     username: str,
     request: AIChatRequest,
 ) -> AIChatResponse:
-    board = repository.get_board(username)
+    board = (
+        repository.get_board_by_id(username, request.board_id)
+        if request.board_id
+        else repository.get_board(username)
+    )
     if board is None:
         raise LookupError("Board not found")
 
@@ -86,7 +90,7 @@ def run_ai_chat(
 
     try:
         resulting_board = repository.apply_operations(
-            username, model_response.operations
+            username, model_response.operations, request.board_id
         )
     except BoardOperationError as error:
         raise AIResponseError("OpenRouter returned invalid board operations.") from error

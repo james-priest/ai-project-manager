@@ -23,22 +23,44 @@ the user's first board.
 
 ## Phase 2 - Multi-board UI
 
-- [ ] Board switcher (list, create, rename, delete) in the frontend
-- [ ] Registration and account UI; per-user session handling
-- [ ] AI assistant scoped to the active board
-- [ ] Unit/component tests and Playwright journeys
+- [x] Board switcher (list, create, rename, delete) in the frontend
+- [x] Registration and account UI; per-user session handling
+- [x] AI assistant scoped to the active board
+- [x] Unit/component tests and Playwright journeys
+
+Phase 2 landed: `BoardSwitcher` drives board selection from `AuthGate`, which owns the
+board list and the active board. `LoginForm` toggles between sign-in and registration.
+`/api/ai/chat` takes a `board_id`, verified against the live provider. Frontend suites:
+65 unit tests, 20 Playwright tests (`tests/boards.spec.ts` registers a throwaway account
+per run).
 
 ## Phase 3 - Richer cards
 
-- [ ] Labels, due dates, assignees, description markdown
-- [ ] Card detail view; filtering and search
-- [ ] Tests at each layer
+- [x] Labels (board-scoped, five colors), due dates, assignees
+- [x] Filtering and search across title, details, and assignee
+- [x] Tests at each layer
+- [ ] Description markdown and a full card detail view (deferred)
+
+Phase 3 landed: schema v3 adds `cards.due_date`, `cards.assignee`, `labels`, and
+`card_labels`. `BoardToolbar` holds search, label filters, and label management;
+`filterBoard` in `lib/kanban.ts` does the filtering. Suites: 84 backend tests,
+83 frontend unit tests, 22 Playwright tests.
 
 ## Phase 4 - Collaboration and history
 
-- [ ] Board members and sharing
-- [ ] Activity log / audit trail
-- [ ] Comments on cards
+- [x] Board members and sharing (owner invites, members can leave)
+- [x] Activity log / audit trail per board
+- [x] Comments on cards, with counts on the card face
+
+Phase 4 landed: schema v4 adds `board_members`, `card_comments`, and `activities`.
+Access is membership-based everywhere; only owners can share or delete a board.
+`CollaborationPanel` shows members and recent activity; `CardComments` lives in the
+card editor. Suites: 94 backend tests, 96 frontend unit tests, 23 Playwright tests.
+
+Known issue: `tests/kanban.spec.ts` and `tests/ai.spec.ts` share the seeded demo
+board, so a failed run can leave it dirty for the next one. Both now reset the state
+they depend on, but converting them to per-run accounts (as `boards.spec.ts` and
+`collaboration.spec.ts` do) would remove the coupling.
 
 ## Phase 5 - Polish
 

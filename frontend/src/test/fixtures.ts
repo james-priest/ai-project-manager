@@ -1,3 +1,4 @@
+import type { BoardSummary } from "@/lib/api";
 import type { BoardData } from "@/lib/kanban";
 
 export const testBoard: BoardData = {
@@ -17,41 +18,96 @@ export const testBoard: BoardData = {
       id: "card-1",
       title: "Align roadmap themes",
       details: "Draft quarterly themes with impact statements and metrics.",
+      dueDate: "2026-01-15",
+      assignee: "Ada",
+      labelIds: ["label-urgent"],
+      commentCount: 0,
     },
     "card-2": {
       id: "card-2",
       title: "Gather customer signals",
       details: "Review support tags, sales notes, and churn feedback.",
+      dueDate: null,
+      assignee: "",
+      labelIds: [],
+      commentCount: 0,
     },
     "card-3": {
       id: "card-3",
       title: "Prototype analytics view",
       details: "Sketch initial dashboard layout and key drill-downs.",
+      dueDate: null,
+      assignee: "",
+      labelIds: [],
+      commentCount: 0,
     },
     "card-4": {
       id: "card-4",
       title: "Refine status language",
       details: "Standardize column labels and tone across the board.",
+      dueDate: null,
+      assignee: "",
+      labelIds: [],
+      commentCount: 0,
     },
     "card-5": {
       id: "card-5",
       title: "Design card layout",
       details: "Add hierarchy and spacing for scanning dense lists.",
+      dueDate: null,
+      assignee: "",
+      labelIds: [],
+      commentCount: 0,
     },
     "card-6": {
       id: "card-6",
       title: "QA micro-interactions",
       details: "Verify hover, focus, and loading states.",
+      dueDate: null,
+      assignee: "",
+      labelIds: [],
+      commentCount: 0,
     },
     "card-7": {
       id: "card-7",
       title: "Ship marketing page",
       details: "Final copy approved and asset pack delivered.",
+      dueDate: null,
+      assignee: "",
+      labelIds: [],
+      commentCount: 0,
     },
     "card-8": {
       id: "card-8",
       title: "Close onboarding sprint",
       details: "Document release notes and share internally.",
+      dueDate: null,
+      assignee: "",
+      labelIds: [],
+      commentCount: 0,
     },
   },
+  labels: {
+    "label-urgent": { id: "label-urgent", name: "Urgent", color: "purple" },
+    "label-chore": { id: "label-chore", name: "Chore", color: "gray" },
+  },
 };
+
+export const testBoardSummaries: BoardSummary[] = [
+  {
+    id: "board-1",
+    title: "Kanban Studio",
+    cardCount: 8,
+    updatedAt: "2026-01-01T00:00:00+00:00",
+    role: "owner",
+    memberCount: 1,
+  },
+  {
+    id: "board-2",
+    title: "Launch plan",
+    cardCount: 0,
+    updatedAt: "2026-01-02T00:00:00+00:00",
+    role: "editor",
+    memberCount: 2,
+  },
+];

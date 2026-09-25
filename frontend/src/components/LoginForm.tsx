@@ -12,6 +12,7 @@ export const LoginForm = ({ onAuthenticated }: LoginFormProps) => {
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isRegistering, setIsRegistering] = useState(false);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -20,14 +21,30 @@ export const LoginForm = ({ onAuthenticated }: LoginFormProps) => {
 
     try {
       // Bad credentials come back as a 401, handled below.
-      const data = await api.login(username, password);
+      const data = isRegistering
+        ? await api.register(username, password)
+        : await api.login(username, password);
       await onAuthenticated(data.username);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         setError("Invalid username or password.");
         return;
       }
-      setError("Unable to sign in. Please try again.");
+      if (error instanceof ApiError && error.status === 409) {
+        setError("That username is already taken.");
+        return;
+      }
+      if (error instanceof ApiError && error.status === 422) {
+        setError(
+          "Usernames need 3+ letters, numbers, - or _, and passwords need 8+ characters."
+        );
+        return;
+      }
+      setError(
+        isRegistering
+          ? "Unable to create your account. Please try again."
+          : "Unable to sign in. Please try again."
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -40,10 +57,12 @@ export const LoginForm = ({ onAuthenticated }: LoginFormProps) => {
           Single Board Kanban
         </p>
         <h1 className="mt-3 font-display text-4xl font-semibold text-[var(--navy-dark)]">
-          Sign in to Kanban Studio
+          {isRegistering ? "Create your account" : "Sign in to Kanban Studio"}
         </h1>
         <p className="mt-3 text-sm leading-6 text-[var(--gray-text)]">
-          Sign in to continue to your project board.
+          {isRegistering
+            ? "Pick a username and password to start your first board."
+            : "Sign in to continue to your project boards."}
         </p>
 
         <form onSubmit={handleSubmit} className="mt-8 space-y-5">
@@ -77,7 +96,9 @@ export const LoginForm = ({ onAuthenticated }: LoginFormProps) => {
               id="password"
               name="password"
               type="password"
-              autoComplete="current-password"
+              autoComplete={
+                isRegistering ? "new-password" : "current-password"
+              }
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               className="mt-2 w-full rounded-xl border border-[var(--stroke)] bg-white px-4 py-3 text-sm font-medium text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)]"
@@ -96,9 +117,29 @@ export const LoginForm = ({ onAuthenticated }: LoginFormProps) => {
             disabled={isSubmitting}
             className="w-full rounded-full bg-[var(--secondary-purple)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:brightness-110 disabled:cursor-wait disabled:opacity-60"
           >
-            {isSubmitting ? "Signing in..." : "Sign in"}
+            {isSubmitting
+              ? isRegistering
+                ? "Creating account..."
+                : "Signing in..."
+              : isRegistering
+                ? "Create account"
+                : "Sign in"}
           </button>
         </form>
+
+        <p className="mt-6 text-center text-sm text-[var(--gray-text)]">
+          {isRegistering ? "Already have an account?" : "New here?"}{" "}
+          <button
+            type="button"
+            onClick={() => {
+              setIsRegistering((current) => !current);
+              setError(null);
+            }}
+            className="font-semibold text-[var(--primary-blue)] underline-offset-4 hover:underline"
+          >
+            {isRegistering ? "Sign in instead" : "Create an account"}
+          </button>
+        </p>
       </section>
     </main>
   );

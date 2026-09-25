@@ -1,8 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..database import BoardRepository
+from ..database import BoardOperationError, BoardRepository
 from ..dependencies import get_board_repository, get_current_user
-from ..schemas import BoardData, BoardSummary, CreateBoardRequest, RenameColumnRequest
+from ..schemas import (
+    ActivityEntry,
+    AddMemberRequest,
+    BoardData,
+    BoardMember,
+    BoardSummary,
+    CreateBoardRequest,
+    CreateLabelRequest,
+    LabelData,
+    RenameColumnRequest,
+)
 
 router = APIRouter()
 
@@ -63,3 +73,92 @@ def delete_board(
             detail="Board not found, or it is the last board for this account",
         )
     return {"deleted": True}
+
+
+@router.post(
+    "/api/boards/{board_id}/labels", status_code=201, response_model=LabelData
+)
+def create_label(
+    board_id: str,
+    request: CreateLabelRequest,
+    username: str = Depends(get_current_user),
+    repository: BoardRepository = Depends(get_board_repository),
+) -> LabelData:
+    try:
+        label = repository.create_label(
+            username, board_id, request.name, request.color
+        )
+    except BoardOperationError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if label is None:
+        raise HTTPException(status_code=404, detail="Board not found")
+    return label
+
+
+@router.delete("/api/boards/{board_id}/labels/{label_id}")
+def delete_label(
+    board_id: str,
+    label_id: str,
+    username: str = Depends(get_current_user),
+    repository: BoardRepository = Depends(get_board_repository),
+) -> dict[str, bool]:
+    if not repository.delete_label(username, board_id, label_id):
+        raise HTTPException(status_code=404, detail="Label not found")
+    return {"deleted": True}
+
+
+@router.get("/api/boards/{board_id}/members", response_model=list[BoardMember])
+def list_members(
+    board_id: str,
+    username: str = Depends(get_current_user),
+    repository: BoardRepository = Depends(get_board_repository),
+) -> list[BoardMember]:
+    members = repository.list_members(username, board_id)
+    if members is None:
+        raise HTTPException(status_code=404, detail="Board not found")
+    return members
+
+
+@router.post(
+    "/api/boards/{board_id}/members", status_code=201, response_model=BoardMember
+)
+def add_member(
+    board_id: str,
+    request: AddMemberRequest,
+    username: str = Depends(get_current_user),
+    repository: BoardRepository = Depends(get_board_repository),
+) -> BoardMember:
+    try:
+        member = repository.add_member(username, board_id, request.username)
+    except BoardOperationError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if member is None:
+        raise HTTPException(
+            status_code=404, detail="Board not found, or you do not own it"
+        )
+    return member
+
+
+@router.delete("/api/boards/{board_id}/members/{member}")
+def remove_member(
+    board_id: str,
+    member: str,
+    username: str = Depends(get_current_user),
+    repository: BoardRepository = Depends(get_board_repository),
+) -> dict[str, bool]:
+    if not repository.remove_member(username, board_id, member):
+        raise HTTPException(status_code=404, detail="Member not found")
+    return {"removed": True}
+
+
+@router.get("/api/boards/{board_id}/activity", response_model=list[ActivityEntry])
+def list_activity(
+    board_id: str,
+    limit: int = 50,
+    username: str = Depends(get_current_user),
+    repository: BoardRepository = Depends(get_board_repository),
+) -> list[ActivityEntry]:
+    entries = repository.list_activity(username, board_id, min(max(limit, 1), 200))
+    if entries is None:
+        raise HTTPException(status_code=404, detail="Board not found")
+    return entries

@@ -15,11 +15,24 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { BoardSwitcher } from "@/components/BoardSwitcher";
+import { BoardToolbar } from "@/components/BoardToolbar";
+import { CollaborationPanel } from "@/components/CollaborationPanel";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { AIChatSidebar } from "@/components/AIChatSidebar";
-import { api, getApiErrorMessage, isSessionExpiredError } from "@/lib/api";
 import {
+  api,
+  newCardDefaults,
+  getApiErrorMessage,
+  isSessionExpiredError,
+  type BoardSummary,
+  type CardFields,
+} from "@/lib/api";
+import {
+  countVisibleCards,
+  emptyFilters,
+  filterBoard,
   findCardColumn,
   getCardDropPosition,
   getKeyboardDropPosition,
@@ -29,10 +42,18 @@ import {
   setCard,
   setColumnTitle,
   type BoardData,
+  type BoardFilters,
+  type LabelColor,
 } from "@/lib/kanban";
 
 type KanbanBoardProps = {
+  boardId: string;
   initialBoard: BoardData;
+  boards?: BoardSummary[];
+  onSelectBoard?: (boardId: string) => Promise<void>;
+  onCreateBoard?: (title: string) => Promise<void>;
+  onRenameBoard?: (boardId: string, title: string) => Promise<void>;
+  onDeleteBoard?: (boardId: string) => Promise<void>;
   onLogout?: () => Promise<void> | void;
   isLoggingOut?: boolean;
   onSessionExpired?: () => void;
@@ -43,7 +64,13 @@ const collisionDetection: CollisionDetection = (args) =>
   args.pointerCoordinates ? pointerWithin(args) : closestCorners(args);
 
 export const KanbanBoard = ({
+  boardId,
   initialBoard,
+  boards = [],
+  onSelectBoard,
+  onCreateBoard,
+  onRenameBoard,
+  onDeleteBoard,
   onLogout,
   isLoggingOut = false,
   onSessionExpired,
@@ -51,6 +78,9 @@ export const KanbanBoard = ({
   const [board, setBoard] = useState<BoardData>(() => initialBoard);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [filters, setFilters] = useState<BoardFilters>(emptyFilters);
+  // Compared against card due dates, so it only needs day precision.
+  const [today] = useState(() => new Date().toISOString().slice(0, 10));
   const pendingMutations = useRef(new Set<Promise<unknown>>());
   const mutationCount = useRef(0);
 
@@ -88,7 +118,7 @@ export const KanbanBoard = ({
       for (;;) {
         await Promise.allSettled(pendingMutations.current);
         const countBeforeLoad = mutationCount.current;
-        const latestBoard = await api.getBoard();
+        const latestBoard = await api.getBoard(boardId);
         if (mutationCount.current === countBeforeLoad) {
           setBoard(latestBoard);
           return;
@@ -199,7 +229,12 @@ export const KanbanBoard = ({
         api.createCard(columnId, title, details)
       );
       setBoard((prev) =>
-        insertCard(prev, columnId, { id, title, details }, Infinity)
+        insertCard(
+          prev,
+          columnId,
+          { id, title, details, ...newCardDefaults },
+          Infinity
+        )
       );
     } catch (error) {
       // The form shows its own message; only session expiry needs the board.
@@ -213,14 +248,23 @@ export const KanbanBoard = ({
   const handleEditCard = async (
     cardId: string,
     title: string,
-    details: string
+    details: string,
+    fields: CardFields
   ) => {
     const previousCard = board.cards[cardId];
     setMutationError(null);
-    setBoard((prev) => setCard(prev, { id: cardId, title, details }));
+    setBoard((prev) =>
+      setCard(prev, {
+        ...prev.cards[cardId],
+        id: cardId,
+        title,
+        details,
+        ...fields,
+      })
+    );
 
     try {
-      await trackMutation(api.updateCard(cardId, title, details));
+      await trackMutation(api.updateCard(cardId, title, details, fields));
     } catch (error) {
       setBoard((prev) => setCard(prev, previousCard));
       // The card's edit form shows its own message.
@@ -248,6 +292,37 @@ export const KanbanBoard = ({
     }
   };
 
+  const handleCreateLabel = async (name: string, color: LabelColor) => {
+    setMutationError(null);
+    try {
+      await trackMutation(api.createLabel(boardId, name, color));
+      await refreshBoard();
+    } catch (error) {
+      handleMutationError(error, "Unable to add that label. Please try again.");
+    }
+  };
+
+  const handleDeleteLabel = async (labelId: string) => {
+    setMutationError(null);
+    setFilters((current) => ({
+      ...current,
+      labelIds: current.labelIds.filter((id) => id !== labelId),
+    }));
+    try {
+      await trackMutation(api.deleteLabel(boardId, labelId));
+      await refreshBoard();
+    } catch (error) {
+      handleMutationError(
+        error,
+        "Unable to remove that label. Please try again."
+      );
+    }
+  };
+
+  const activeBoardRole =
+    boards.find((summary) => summary.id === boardId)?.role ?? "owner";
+  const boardLabels = Object.values(board.labels);
+  const visibleBoard = filterBoard(board, filters);
   const activeCard = activeCardId ? board.cards[activeCardId] : null;
 
   return (
@@ -271,7 +346,8 @@ export const KanbanBoard = ({
                 Single Board Kanban
               </p>
               <h1 className="mt-3 font-display text-4xl font-semibold text-[var(--navy-dark)]">
-                Kanban Studio
+                {boards.find((summary) => summary.id === boardId)?.title ??
+                  "Kanban Studio"}
               </h1>
               <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--gray-text)]">
                 Keep momentum visible. Rename columns, drag cards between stages,
@@ -299,6 +375,16 @@ export const KanbanBoard = ({
               )}
             </div>
           </div>
+          {onSelectBoard && onCreateBoard && onRenameBoard && onDeleteBoard && (
+            <BoardSwitcher
+              boards={boards}
+              activeBoardId={boardId}
+              onSelect={(nextBoardId) => void onSelectBoard(nextBoardId)}
+              onCreate={onCreateBoard}
+              onRename={onRenameBoard}
+              onDelete={onDeleteBoard}
+            />
+          )}
           <div className="flex flex-wrap items-center gap-4">
             {board.columns.map((column) => (
               <div
@@ -312,6 +398,22 @@ export const KanbanBoard = ({
           </div>
         </header>
 
+        <CollaborationPanel
+          boardId={boardId}
+          canManageMembers={activeBoardRole === "owner"}
+          onError={setMutationError}
+        />
+
+        <BoardToolbar
+          labels={boardLabels}
+          filters={filters}
+          visibleCount={countVisibleCards(visibleBoard)}
+          totalCount={Object.keys(board.cards).length}
+          onFiltersChange={setFilters}
+          onCreateLabel={handleCreateLabel}
+          onDeleteLabel={handleDeleteLabel}
+        />
+
         <DndContext
           sensors={sensors}
           collisionDetection={collisionDetection}
@@ -319,11 +421,14 @@ export const KanbanBoard = ({
           onDragEnd={handleDragEnd}
         >
           <section className="grid gap-6 lg:grid-cols-5">
-            {board.columns.map((column) => (
+            {visibleBoard.columns.map((column) => (
               <KanbanColumn
                 key={column.id}
                 column={column}
                 cards={column.cardIds.map((cardId) => board.cards[cardId])}
+                labels={boardLabels}
+                today={today}
+                onCommentsChanged={() => void refreshBoard()}
                 onRename={handleRenameColumn}
                 onAddCard={handleAddCard}
                 onEditCard={handleEditCard}
@@ -340,6 +445,7 @@ export const KanbanBoard = ({
           </DragOverlay>
         </DndContext>
         <AIChatSidebar
+          boardId={boardId}
           onBoardChanged={() => void refreshBoard()}
           onSessionExpired={onSessionExpired}
         />

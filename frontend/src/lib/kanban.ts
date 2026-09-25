@@ -2,7 +2,27 @@ export type Card = {
   id: string;
   title: string;
   details: string;
+  dueDate: string | null;
+  assignee: string;
+  labelIds: string[];
+  commentCount: number;
 };
+
+export type Label = {
+  id: string;
+  name: string;
+  color: LabelColor;
+};
+
+export const LABEL_COLORS = [
+  "yellow",
+  "blue",
+  "purple",
+  "navy",
+  "gray",
+] as const;
+
+export type LabelColor = (typeof LABEL_COLORS)[number];
 
 export type Column = {
   id: string;
@@ -13,7 +33,59 @@ export type Column = {
 export type BoardData = {
   columns: Column[];
   cards: Record<string, Card>;
+  labels: Record<string, Label>;
 };
+
+export type BoardFilters = {
+  query: string;
+  labelIds: string[];
+};
+
+export const emptyFilters: BoardFilters = { query: "", labelIds: [] };
+
+export const hasActiveFilters = (filters: BoardFilters) =>
+  filters.query.trim().length > 0 || filters.labelIds.length > 0;
+
+const matchesFilters = (card: Card, filters: BoardFilters) => {
+  const query = filters.query.trim().toLowerCase();
+  const matchesQuery =
+    !query ||
+    [card.title, card.details, card.assignee].some((field) =>
+      field.toLowerCase().includes(query)
+    );
+  const matchesLabels =
+    filters.labelIds.length === 0 ||
+    filters.labelIds.every((labelId) => card.labelIds.includes(labelId));
+
+  return matchesQuery && matchesLabels;
+};
+
+// Hides cards that do not match, leaving columns in place so the board keeps
+// its shape (and drop targets) while a filter is active.
+export const filterBoard = (
+  board: BoardData,
+  filters: BoardFilters
+): BoardData => {
+  if (!hasActiveFilters(filters)) {
+    return board;
+  }
+
+  return {
+    ...board,
+    columns: board.columns.map((column) => ({
+      ...column,
+      cardIds: column.cardIds.filter((cardId) =>
+        matchesFilters(board.cards[cardId], filters)
+      ),
+    })),
+  };
+};
+
+export const countVisibleCards = (board: BoardData) =>
+  board.columns.reduce((total, column) => total + column.cardIds.length, 0);
+
+export const isOverdue = (card: Card, today: string) =>
+  card.dueDate !== null && card.dueDate < today;
 
 export const findCardColumn = (columns: Column[], id: string) =>
   columns.find((column) => column.id === id || column.cardIds.includes(id));
@@ -126,6 +198,7 @@ export const setCard = (board: BoardData, card: Card): BoardData => ({
 });
 
 export const removeCard = (board: BoardData, cardId: string): BoardData => ({
+  ...board,
   cards: Object.fromEntries(
     Object.entries(board.cards).filter(([id]) => id !== cardId)
   ),
@@ -141,6 +214,7 @@ export const insertCard = (
   card: Card,
   position: number
 ): BoardData => ({
+  ...board,
   cards: { ...board.cards, [card.id]: card },
   columns: board.columns.map((column) => {
     if (column.id !== columnId) {

@@ -6,10 +6,20 @@ MAX_TEXT_LENGTH = 2_000
 MAX_HISTORY_MESSAGES = 50
 
 
+class LabelData(BaseModel):
+    id: str
+    name: str
+    color: str
+
+
 class CardData(BaseModel):
     id: str
     title: str
     details: str
+    dueDate: str | None = None
+    assignee: str = ""
+    labelIds: list[str] = Field(default_factory=list)
+    commentCount: int = 0
 
 
 class ColumnData(BaseModel):
@@ -21,6 +31,44 @@ class ColumnData(BaseModel):
 class BoardData(BaseModel):
     columns: list[ColumnData]
     cards: dict[str, CardData]
+    labels: dict[str, LabelData] = Field(default_factory=dict)
+
+
+
+ISO_DATE = r"^\d{4}-\d{2}-\d{2}$"
+LABEL_COLORS = {"yellow", "blue", "purple", "navy", "gray"}
+
+
+class CardFields(BaseModel):
+    due_date: str | None = Field(default=None, pattern=ISO_DATE)
+    assignee: str = Field(default="", max_length=100)
+    label_ids: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("assignee")
+    @classmethod
+    def clean_assignee(cls, value: str) -> str:
+        return value.strip()
+
+
+class CreateLabelRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    color: str = "blue"
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("name must not be blank")
+        return value
+
+    @field_validator("color")
+    @classmethod
+    def known_color(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in LABEL_COLORS:
+            raise ValueError(f"color must be one of {sorted(LABEL_COLORS)}")
+        return value
 
 
 class BoardSummary(BaseModel):
@@ -28,6 +76,48 @@ class BoardSummary(BaseModel):
     title: str
     cardCount: int
     updatedAt: str
+    role: str = "owner"
+    memberCount: int = 1
+
+
+class BoardMember(BaseModel):
+    username: str
+    role: str
+
+
+class AddMemberRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=50)
+
+    @field_validator("username")
+    @classmethod
+    def normalize(cls, value: str) -> str:
+        return value.strip().lower()
+
+
+class CommentData(BaseModel):
+    id: str
+    author: str
+    body: str
+    createdAt: str
+
+
+class CreateCommentRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+
+    @field_validator("body")
+    @classmethod
+    def clean_body(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("body must not be blank")
+        return value
+
+
+class ActivityEntry(BaseModel):
+    id: str
+    actor: str
+    summary: str
+    createdAt: str
 
 
 class CreateBoardRequest(BaseModel):
@@ -153,6 +243,7 @@ BoardOperation = Annotated[
 
 class AIChatRequest(BaseModel):
     question: str = Field(max_length=MAX_TEXT_LENGTH)
+    board_id: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
     history: list[ConversationMessage] = Field(
         default_factory=list, max_length=MAX_HISTORY_MESSAGES
     )
@@ -197,7 +288,7 @@ class RenameColumnRequest(BaseModel):
         return value
 
 
-class CreateCardRequest(BaseModel):
+class CreateCardRequest(CardFields):
     column_id: str = Field(min_length=1)
     title: str = Field(max_length=MAX_TEXT_LENGTH)
     details: str = Field(default="", max_length=MAX_TEXT_LENGTH)
@@ -216,7 +307,7 @@ class CreateCardRequest(BaseModel):
         return value.strip()
 
 
-class UpdateCardRequest(BaseModel):
+class UpdateCardRequest(CardFields):
     title: str = Field(max_length=MAX_TEXT_LENGTH)
     details: str = Field(default="", max_length=MAX_TEXT_LENGTH)
 

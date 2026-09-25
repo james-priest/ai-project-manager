@@ -39,6 +39,10 @@ const dragCardToColumn = async (
 ) => {
   const card = page.getByTestId(`card-${cardId}`);
   const targetColumn = page.getByTestId(`column-${columnId}`);
+  // Boxes are viewport-relative, so make sure both ends are on screen before
+  // measuring; the drop point is clamped to stay inside the column.
+  await card.scrollIntoViewIfNeeded();
+  await targetColumn.scrollIntoViewIfNeeded();
   const cardBox = await card.boundingBox();
   const columnBox = await targetColumn.boundingBox();
   if (!cardBox || !columnBox) {
@@ -57,7 +61,7 @@ const dragCardToColumn = async (
   await page.mouse.down();
   await page.mouse.move(
     columnBox.x + columnBox.width / 2,
-    columnBox.y + 120,
+    columnBox.y + Math.min(120, columnBox.height / 2),
     { steps: 12 }
   );
   await page.mouse.up();
@@ -72,6 +76,8 @@ const dragCardAfterLastCard = async (
   const card = page.getByTestId(`card-${cardId}`);
   const targetColumn = page.getByTestId(`column-${columnId}`);
   const lastCard = targetColumn.locator('[data-testid^="card-"]').last();
+  await card.scrollIntoViewIfNeeded();
+  await lastCard.scrollIntoViewIfNeeded();
   const cardBox = await card.boundingBox();
   const lastCardBox = await lastCard.boundingBox();
   if (!cardBox || !lastCardBox) {
@@ -181,6 +187,17 @@ test("persists a card edit after reload", async ({ page }) => {
 
 test("moves a card between columns", async ({ page }) => {
   await signIn(page);
+
+  // Start from a known position; a drag that does not change anything sends
+  // no request, so a leftover placement would hang this test.
+  const resetResponse = await page.request.post(
+    "/api/board/cards/card-1/move",
+    { data: { target_column_id: "col-backlog", position: 0 } }
+  );
+  expect(resetResponse.ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+
   const targetColumn = page.getByTestId("column-col-review");
   await dragCardToColumn(page, "card-1", "col-review");
   await expect(targetColumn.getByTestId("card-card-1")).toBeVisible();

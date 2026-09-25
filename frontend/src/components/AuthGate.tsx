@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { KanbanBoard } from "@/components/KanbanBoard";
 import { LoginForm } from "@/components/LoginForm";
-import { ApiError, api } from "@/lib/api";
+import { ApiError, api, type BoardSummary } from "@/lib/api";
 import type { BoardData } from "@/lib/kanban";
 
 type WorkspaceState =
@@ -15,6 +15,8 @@ type WorkspaceState =
 export const AuthGate = () => {
   const [workspaceState, setWorkspaceState] =
     useState<WorkspaceState>("loading");
+  const [boards, setBoards] = useState<BoardSummary[]>([]);
+  const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
   const [board, setBoard] = useState<BoardData | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,6 +24,8 @@ export const AuthGate = () => {
   const handleLoadError = useCallback((loadError: unknown) => {
     if (loadError instanceof ApiError && loadError.status === 401) {
       setBoard(null);
+      setBoards([]);
+      setActiveBoardId(null);
       setWorkspaceState("unauthenticated");
       return;
     }
@@ -30,31 +34,32 @@ export const AuthGate = () => {
     setWorkspaceState("error");
   }, []);
 
-  const loadBoard = useCallback(async () => {
-    setWorkspaceState("loading");
-    setError(null);
+  // Loads the board list and opens one of them; keeps the current board when
+  // it still exists so switching accounts or deleting lands somewhere sensible.
+  const loadWorkspace = useCallback(
+    async (preferredBoardId?: string) => {
+      setWorkspaceState("loading");
+      setError(null);
 
-    try {
-      setBoard(await api.getBoard());
-      setWorkspaceState("authenticated");
-    } catch (loadError) {
-      handleLoadError(loadError);
-    }
-  }, [handleLoadError]);
+      try {
+        const nextBoards = await api.listBoards();
+        const nextBoardId =
+          nextBoards.find((summary) => summary.id === preferredBoardId)?.id ??
+          nextBoards[0]?.id;
+        if (!nextBoardId) {
+          throw new ApiError("No boards available.", 404);
+        }
 
-  const loadWorkspace = useCallback(async () => {
-    setWorkspaceState("loading");
-    setError(null);
-
-    try {
-      // An unauthenticated caller gets a 401, handled by handleLoadError.
-      await api.getCurrentUser();
-      setBoard(await api.getBoard());
-      setWorkspaceState("authenticated");
-    } catch (loadError) {
-      handleLoadError(loadError);
-    }
-  }, [handleLoadError]);
+        setBoards(nextBoards);
+        setActiveBoardId(nextBoardId);
+        setBoard(await api.getBoard(nextBoardId));
+        setWorkspaceState("authenticated");
+      } catch (loadError) {
+        handleLoadError(loadError);
+      }
+    },
+    [handleLoadError]
+  );
 
   useEffect(() => {
     void loadWorkspace();
@@ -62,8 +67,53 @@ export const AuthGate = () => {
 
   const handleSessionExpired = useCallback(() => {
     setBoard(null);
+    setBoards([]);
+    setActiveBoardId(null);
     setWorkspaceState("unauthenticated");
   }, []);
+
+  const runBoardAction = async (action: () => Promise<string | undefined>) => {
+    setError(null);
+    try {
+      const preferredBoardId = await action();
+      await loadWorkspace(preferredBoardId);
+    } catch (actionError) {
+      if (actionError instanceof ApiError && actionError.status === 401) {
+        handleSessionExpired();
+        return;
+      }
+      setError(
+        actionError instanceof ApiError
+          ? actionError.message
+          : "Unable to update your boards. Please try again."
+      );
+    }
+  };
+
+  const handleSelectBoard = async (boardId: string) => {
+    if (boardId === activeBoardId) {
+      return;
+    }
+    await runBoardAction(async () => boardId);
+  };
+
+  const handleCreateBoard = async (title: string) => {
+    await runBoardAction(async () => (await api.createBoard(title)).id);
+  };
+
+  const handleRenameBoard = async (boardId: string, title: string) => {
+    await runBoardAction(async () => {
+      await api.renameBoard(boardId, title);
+      return boardId;
+    });
+  };
+
+  const handleDeleteBoard = async (boardId: string) => {
+    await runBoardAction(async () => {
+      await api.deleteBoard(boardId);
+      return undefined;
+    });
+  };
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -72,6 +122,8 @@ export const AuthGate = () => {
     try {
       await api.logout();
       setBoard(null);
+      setBoards([]);
+      setActiveBoardId(null);
       setWorkspaceState("unauthenticated");
     } catch {
       setError("Unable to sign out. Please try again.");
@@ -98,7 +150,7 @@ export const AuthGate = () => {
         </p>
         <button
           type="button"
-          onClick={() => void loadWorkspace()}
+          onClick={() => void loadWorkspace(activeBoardId ?? undefined)}
           className="rounded-full bg-[var(--secondary-purple)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:brightness-110"
         >
           Try again
@@ -108,7 +160,7 @@ export const AuthGate = () => {
   }
 
   if (workspaceState === "unauthenticated") {
-    return <LoginForm onAuthenticated={loadBoard} />;
+    return <LoginForm onAuthenticated={() => loadWorkspace()} />;
   }
 
   return (
@@ -121,9 +173,16 @@ export const AuthGate = () => {
           {error}
         </p>
       )}
-      {board && (
+      {board && activeBoardId && (
         <KanbanBoard
+          key={activeBoardId}
+          boardId={activeBoardId}
           initialBoard={board}
+          boards={boards}
+          onSelectBoard={handleSelectBoard}
+          onCreateBoard={handleCreateBoard}
+          onRenameBoard={handleRenameBoard}
+          onDeleteBoard={handleDeleteBoard}
           onLogout={handleLogout}
           isLoggingOut={isLoggingOut}
           onSessionExpired={handleSessionExpired}

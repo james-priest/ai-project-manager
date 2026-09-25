@@ -1,5 +1,10 @@
 import {
+  countVisibleCards,
+  emptyFilters,
+  filterBoard,
   getCardDropPosition,
+  hasActiveFilters,
+  isOverdue,
   getKeyboardDropPosition,
   insertCard,
   moveCardToPosition,
@@ -7,6 +12,7 @@ import {
   setCard,
   setColumnTitle,
   type BoardData,
+  type Card,
   type Column,
 } from "@/lib/kanban";
 
@@ -61,6 +67,16 @@ describe("getKeyboardDropPosition", () => {
   });
 });
 
+const card = (id: string, title: string): Card => ({
+  id,
+  title,
+  details: "",
+  dueDate: null,
+  assignee: "",
+  labelIds: [],
+  commentCount: 0,
+});
+
 describe("board entity transforms", () => {
   const board: BoardData = {
     columns: [
@@ -68,9 +84,10 @@ describe("board entity transforms", () => {
       { id: "col-b", title: "B", cardIds: [] },
     ],
     cards: {
-      "card-1": { id: "card-1", title: "One", details: "" },
-      "card-2": { id: "card-2", title: "Two", details: "" },
+      "card-1": card("card-1", "One"),
+      "card-2": card("card-2", "Two"),
     },
+    labels: {},
   };
 
   it("sets a column title without touching other columns", () => {
@@ -79,8 +96,9 @@ describe("board entity transforms", () => {
   });
 
   it("replaces a card", () => {
-    const result = setCard(board, { id: "card-2", title: "New", details: "x" });
-    expect(result.cards["card-2"]).toEqual({ id: "card-2", title: "New", details: "x" });
+    const replacement = { ...card("card-2", "New"), details: "x" };
+    const result = setCard(board, replacement);
+    expect(result.cards["card-2"]).toEqual(replacement);
     expect(result.cards["card-1"]).toBe(board.cards["card-1"]);
   });
 
@@ -95,7 +113,84 @@ describe("board entity transforms", () => {
   });
 
   it("clamps an insert past the end of the column", () => {
-    const result = insertCard(board, "col-a", { id: "card-3", title: "Three", details: "" }, 99);
+    const result = insertCard(board, "col-a", card("card-3", "Three"), 99);
     expect(result.columns[0].cardIds).toEqual(["card-1", "card-2", "card-3"]);
+  });
+});
+
+describe("board filters", () => {
+  const labelled = (id: string, title: string, overrides: Partial<Card>): Card => ({
+    ...card(id, title),
+    ...overrides,
+  });
+
+  const board: BoardData = {
+    columns: [
+      { id: "col-a", title: "A", cardIds: ["card-1", "card-2"] },
+      { id: "col-b", title: "B", cardIds: ["card-3"] },
+    ],
+    cards: {
+      "card-1": labelled("card-1", "Ship release", {
+        details: "Cut the tag",
+        labelIds: ["label-urgent"],
+        assignee: "Ada",
+      }),
+      "card-2": labelled("card-2", "Write docs", { labelIds: ["label-chore"] }),
+      "card-3": labelled("card-3", "Fix crash", {
+        labelIds: ["label-urgent", "label-chore"],
+      }),
+    },
+    labels: {
+      "label-urgent": { id: "label-urgent", name: "Urgent", color: "purple" },
+      "label-chore": { id: "label-chore", name: "Chore", color: "gray" },
+    },
+  };
+
+  it("returns the same board when no filter is active", () => {
+    expect(filterBoard(board, emptyFilters)).toBe(board);
+    expect(hasActiveFilters(emptyFilters)).toBe(false);
+    expect(hasActiveFilters({ query: "  ", labelIds: [] })).toBe(false);
+  });
+
+  it("matches the query against title, details, and assignee", () => {
+    const byTitle = filterBoard(board, { query: "ship", labelIds: [] });
+    expect(byTitle.columns[0].cardIds).toEqual(["card-1"]);
+
+    const byDetails = filterBoard(board, { query: "cut the tag", labelIds: [] });
+    expect(byDetails.columns[0].cardIds).toEqual(["card-1"]);
+
+    const byAssignee = filterBoard(board, { query: "ada", labelIds: [] });
+    expect(byAssignee.columns[0].cardIds).toEqual(["card-1"]);
+  });
+
+  it("requires every selected label", () => {
+    const single = filterBoard(board, { query: "", labelIds: ["label-urgent"] });
+    expect(single.columns[0].cardIds).toEqual(["card-1"]);
+    expect(single.columns[1].cardIds).toEqual(["card-3"]);
+
+    const both = filterBoard(board, {
+      query: "",
+      labelIds: ["label-urgent", "label-chore"],
+    });
+    expect(both.columns[0].cardIds).toEqual([]);
+    expect(both.columns[1].cardIds).toEqual(["card-3"]);
+  });
+
+  it("combines the query with label filters and keeps every column", () => {
+    const result = filterBoard(board, {
+      query: "fix",
+      labelIds: ["label-urgent"],
+    });
+
+    expect(result.columns).toHaveLength(2);
+    expect(countVisibleCards(result)).toBe(1);
+    expect(result.columns[1].cardIds).toEqual(["card-3"]);
+  });
+
+  it("flags cards past their due date", () => {
+    const due = labelled("card-4", "Overdue", { dueDate: "2026-01-01" });
+    expect(isOverdue(due, "2026-02-01")).toBe(true);
+    expect(isOverdue(due, "2026-01-01")).toBe(false);
+    expect(isOverdue(card("card-5", "No date"), "2026-02-01")).toBe(false);
   });
 });

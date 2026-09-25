@@ -10,7 +10,7 @@ describe("KanbanBoard", () => {
     vi.unstubAllGlobals();
   });
 
-  const renderBoard = () => render(<KanbanBoard initialBoard={testBoard} />);
+  const renderBoard = () => render(<KanbanBoard boardId="board-1" initialBoard={testBoard} />);
 
   it("renders five columns", () => {
     renderBoard();
@@ -110,10 +110,13 @@ describe("KanbanBoard", () => {
   });
 
   it("edits a card through the board API", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ updated: true }),
-    });
+    // The open editor also loads comments, so answer by URL.
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve({
+        ok: true,
+        json: async () => (url.endsWith("/comments") ? [] : { updated: true }),
+      })
+    );
     vi.stubGlobal("fetch", fetchMock);
     renderBoard();
 
@@ -177,6 +180,9 @@ describe("KanbanBoard", () => {
       column_id: "col-backlog",
       title: "Detail free",
       details: "",
+      due_date: null,
+      assignee: "",
+      label_ids: [],
     });
     expect(
       within(screen.getByTestId("card-card-new")).getByText("No details yet.")
@@ -199,6 +205,124 @@ describe("KanbanBoard", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Align roadmap themes")).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("shows labels, due dates, and assignees on a card", () => {
+    renderBoard();
+
+    const card = screen.getByTestId("card-card-1");
+    expect(within(card).getByText("Urgent")).toBeInTheDocument();
+    expect(within(card).getByText("Ada")).toBeInTheDocument();
+    // The fixture date is in the past, so it reads as overdue.
+    expect(within(card).getByText(/Overdue 2026-01-15/)).toBeInTheDocument();
+  });
+
+  it("saves due date, assignee, and labels from the card editor", async () => {
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve({
+        ok: true,
+        json: async () => (url.endsWith("/comments") ? [] : { updated: true }),
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderBoard();
+
+    const card = screen.getByTestId("card-card-2");
+    await userEvent.click(
+      within(card).getByRole("button", { name: /^Edit/ })
+    );
+    await userEvent.type(
+      within(card).getByLabelText("Assignee for Gather customer signals"),
+      "Grace"
+    );
+    await userEvent.click(
+      within(card).getByLabelText("Chore label for Gather customer signals")
+    );
+    await userEvent.click(within(card).getByRole("button", { name: "Save" }));
+
+    const patchCall = await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([, init]) => (init as RequestInit | undefined)?.method === "PATCH"
+      );
+      expect(call).toBeDefined();
+      return call!;
+    });
+    expect(JSON.parse((patchCall[1] as RequestInit).body as string)).toMatchObject({
+      assignee: "Grace",
+      label_ids: ["label-chore"],
+      due_date: null,
+    });
+  });
+
+  it("shows a comment count on a card with no other details", () => {
+    const boardWithComments = {
+      ...testBoard,
+      cards: {
+        ...testBoard.cards,
+        "card-2": { ...testBoard.cards["card-2"], commentCount: 1 },
+      },
+    };
+    render(<KanbanBoard boardId="board-1" initialBoard={boardWithComments} />);
+
+    const card = screen.getByTestId("card-card-2");
+    expect(within(card).getByText(/1 comment/)).toBeInTheDocument();
+    // The metadata row stays hidden for a card with nothing to show.
+    expect(
+      within(screen.getByTestId("card-card-3")).queryByText(/comment/)
+    ).not.toBeInTheDocument();
+  });
+
+  it("filters cards by text and by label", async () => {
+    renderBoard();
+
+    await userEvent.type(screen.getByLabelText("Search cards"), "roadmap");
+    expect(screen.getByTestId("card-card-1")).toBeInTheDocument();
+    expect(screen.queryByTestId("card-card-2")).not.toBeInTheDocument();
+    expect(screen.getByText("1 of 8 cards")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByTestId("card-card-2")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Urgent" }));
+    expect(screen.getByTestId("card-card-1")).toBeInTheDocument();
+    expect(screen.queryByTestId("card-card-3")).not.toBeInTheDocument();
+  });
+
+  it("creates a label and reloads the board", async () => {
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "label-new",
+            name: "Blocked",
+            color: "blue",
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => testBoard });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderBoard();
+
+    await userEvent.click(screen.getByRole("button", { name: "Labels" }));
+    await userEvent.type(screen.getByLabelText("New label name"), "Blocked");
+    await userEvent.click(screen.getByRole("button", { name: "Add label" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/boards/board-1/labels",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ name: "Blocked", color: "blue" }),
+        })
+      )
+    );
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url]) => url === "/api/boards/board-1")
+      ).toBe(true)
+    );
   });
 
   it("rolls back only the failed change when mutations overlap", async () => {
@@ -292,7 +416,7 @@ describe("KanbanBoard", () => {
     await screen.findByText("Done.");
 
     const boardRequests = () =>
-      fetchMock.mock.calls.filter(([url]) => url === "/api/board");
+      fetchMock.mock.calls.filter(([url]) => url === "/api/boards/board-1");
     expect(boardRequests()).toHaveLength(0);
     expect(screen.queryByText("Align roadmap themes")).not.toBeInTheDocument();
 
@@ -313,6 +437,7 @@ describe("KanbanBoard", () => {
     const onSessionExpired = vi.fn();
     render(
       <KanbanBoard
+        boardId="board-1"
         initialBoard={testBoard}
         onSessionExpired={onSessionExpired}
       />

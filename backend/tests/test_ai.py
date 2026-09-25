@@ -327,3 +327,66 @@ def test_repository_rolls_back_a_failed_batch(
         )
 
     assert repository.get_board("user") == before
+
+
+def test_chat_targets_the_requested_board(client: TestClient) -> None:
+    register = client.post(
+        "/api/auth/register",
+        json={"username": "ada", "password": "hunter2pass"},
+    )
+    assert register.status_code == 201
+    second_board = client.post("/api/boards", json={"title": "Launch"}).json()
+    column_id = client.get(f"/api/boards/{second_board['id']}").json()["columns"][0][
+        "id"
+    ]
+
+    provider = FakeProvider(
+        model_response(
+            "Added it.",
+            [
+                {
+                    "operation": "create_card",
+                    "column_id": column_id,
+                    "position": 0,
+                    "title": "Book launch venue",
+                    "details": "",
+                }
+            ],
+        )
+    )
+    app.dependency_overrides[get_ai_provider] = lambda: provider
+
+    response = client.post(
+        "/api/ai/chat",
+        json={"question": "Add a task.", "board_id": second_board["id"]},
+    )
+
+    assert response.status_code == 200
+    titles = [card["title"] for card in response.json()["board"]["cards"].values()]
+    assert titles == ["Book launch venue"]
+    # The prompt and the change both stay on the requested board.
+    assert "Book launch venue" not in provider.prompts[0]
+    first_board = client.get("/api/boards").json()[0]
+    assert first_board["cardCount"] == 0
+
+
+def test_chat_rejects_a_board_owned_by_someone_else(client: TestClient) -> None:
+    client.post(
+        "/api/auth/register", json={"username": "ada", "password": "hunter2pass"}
+    )
+    ada_board_id = client.get("/api/boards").json()[0]["id"]
+    client.post("/api/auth/logout")
+    client.post(
+        "/api/auth/register", json={"username": "grace", "password": "hunter2pass"}
+    )
+
+    provider = FakeProvider(model_response("Nothing to do.", []))
+    app.dependency_overrides[get_ai_provider] = lambda: provider
+
+    response = client.post(
+        "/api/ai/chat",
+        json={"question": "Summarize.", "board_id": ada_board_id},
+    )
+
+    assert response.status_code == 404
+    assert provider.prompts == []

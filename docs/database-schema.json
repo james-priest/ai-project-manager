@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "purpose": "SQLite storage design for the Project Management MVP",
   "storage": {
     "engine": "SQLite",
@@ -159,6 +159,19 @@
           "default": ""
         },
         {
+          "name": "due_date",
+          "type": "TEXT",
+          "nullable": true,
+          "purpose": "ISO date (YYYY-MM-DD) the card is due"
+        },
+        {
+          "name": "assignee",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "",
+          "purpose": "Free-text owner name"
+        },
+        {
           "name": "position",
           "type": "INTEGER",
           "nullable": false,
@@ -215,6 +228,239 @@
           ],
           "references": "users(id)",
           "on_delete": "CASCADE"
+        }
+      ]
+    },
+    {
+      "name": "labels",
+      "purpose": "Board-scoped card labels",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": true
+        },
+        {
+          "name": "board_id",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "color",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "blue"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "unique": [
+        [
+          "board_id",
+          "name"
+        ]
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "board_id"
+          ],
+          "references": "boards(id)",
+          "on_delete": "CASCADE"
+        }
+      ]
+    },
+    {
+      "name": "card_labels",
+      "purpose": "Join table attaching labels to cards",
+      "columns": [
+        {
+          "name": "card_id",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "label_id",
+          "type": "TEXT",
+          "nullable": false
+        }
+      ],
+      "primary_key": [
+        "card_id",
+        "label_id"
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "card_id"
+          ],
+          "references": "cards(id)",
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "label_id"
+          ],
+          "references": "labels(id)",
+          "on_delete": "CASCADE"
+        }
+      ]
+    },
+    {
+      "name": "board_members",
+      "purpose": "Who can see and edit a board; every board has exactly one owner",
+      "columns": [
+        {
+          "name": "board_id",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "user_id",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "role",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "editor",
+          "check": "role IN ('owner', 'editor')"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "primary_key": [
+        "board_id",
+        "user_id"
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "board_id"
+          ],
+          "references": "boards(id)",
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "references": "users(id)",
+          "on_delete": "CASCADE"
+        }
+      ]
+    },
+    {
+      "name": "card_comments",
+      "purpose": "Comments people leave on a card",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": true
+        },
+        {
+          "name": "card_id",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "user_id",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "card_id"
+          ],
+          "references": "cards(id)",
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "references": "users(id)",
+          "on_delete": "CASCADE"
+        }
+      ]
+    },
+    {
+      "name": "activities",
+      "purpose": "Audit trail of board changes, newest first in the API",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": true
+        },
+        {
+          "name": "board_id",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "user_id",
+          "type": "TEXT",
+          "nullable": true,
+          "purpose": "Null once the actor's account is gone"
+        },
+        {
+          "name": "summary",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "board_id"
+          ],
+          "references": "boards(id)",
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "references": "users(id)",
+          "on_delete": "SET NULL"
         }
       ]
     }

@@ -68,6 +68,10 @@ def test_board_api_supports_authenticated_crud_and_ordering(
         "id": card_id,
         "title": "Updated card",
         "details": "Updated notes",
+        "dueDate": None,
+        "assignee": "",
+        "labelIds": [],
+        "commentCount": 0,
     }
 
     delete_response = client.delete(f"/api/board/cards/{card_id}")

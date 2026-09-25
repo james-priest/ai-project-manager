@@ -8,8 +8,12 @@ from pathlib import Path
 
 from .config import get_database_path
 from .schemas import (
+    ActivityEntry,
     BoardData,
+    BoardMember,
     BoardSummary,
+    CommentData,
+    LabelData,
     BoardOperation,
     CardData,
     ColumnData,
@@ -167,11 +171,62 @@ def initialize_database(database_path: Path | None = None) -> None:
                 column_id TEXT NOT NULL,
                 title TEXT NOT NULL,
                 details TEXT NOT NULL DEFAULT '',
+                due_date TEXT,
+                assignee TEXT NOT NULL DEFAULT '',
                 position INTEGER NOT NULL CHECK (position >= 0),
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE (column_id, position),
                 FOREIGN KEY (column_id) REFERENCES columns(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS board_members (
+                board_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'editor'
+                    CHECK (role IN ('owner', 'editor')),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (board_id, user_id),
+                FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS card_comments (
+                id TEXT PRIMARY KEY,
+                card_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                body TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS activities (
+                id TEXT PRIMARY KEY,
+                board_id TEXT NOT NULL,
+                user_id TEXT,
+                summary TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS labels (
+                id TEXT PRIMARY KEY,
+                board_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                color TEXT NOT NULL DEFAULT 'blue',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (board_id, name),
+                FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS card_labels (
+                card_id TEXT NOT NULL,
+                label_id TEXT NOT NULL,
+                PRIMARY KEY (card_id, label_id),
+                FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+                FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS sessions (
@@ -221,6 +276,8 @@ def migrate_database(connection: sqlite3.Connection) -> None:
             """
         )
         connection.execute("PRAGMA foreign_keys = ON")
+        _migrate_card_columns(connection)
+        _backfill_board_members(connection)
         return
 
     columns = {
@@ -230,6 +287,38 @@ def migrate_database(connection: sqlite3.Connection) -> None:
     if "position" not in columns:
         connection.execute(
             "ALTER TABLE boards ADD COLUMN position INTEGER NOT NULL DEFAULT 0"
+        )
+
+    _migrate_card_columns(connection)
+    _backfill_board_members(connection)
+
+
+def _backfill_board_members(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        INSERT INTO board_members (board_id, user_id, role, created_at)
+        SELECT boards.id, boards.user_id, 'owner', ?
+        FROM boards
+        WHERE NOT EXISTS (
+            SELECT 1 FROM board_members
+            WHERE board_members.board_id = boards.id
+              AND board_members.user_id = boards.user_id
+        )
+        """,
+        (utc_now(),),
+    )
+
+
+def _migrate_card_columns(connection: sqlite3.Connection) -> None:
+    card_columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(cards)").fetchall()
+    }
+    if "due_date" not in card_columns:
+        connection.execute("ALTER TABLE cards ADD COLUMN due_date TEXT")
+    if "assignee" not in card_columns:
+        connection.execute(
+            "ALTER TABLE cards ADD COLUMN assignee TEXT NOT NULL DEFAULT ''"
         )
 
 
@@ -261,6 +350,15 @@ def seed_initial_data(connection: sqlite3.Connection) -> None:
     ).fetchone()
     if board is None:
         return
+
+    connection.execute(
+        """
+        INSERT INTO board_members (board_id, user_id, role, created_at)
+        VALUES (?, ?, 'owner', ?)
+        ON CONFLICT(board_id, user_id) DO NOTHING
+        """,
+        (board["id"], user["id"], utc_now()),
+    )
 
     has_columns = connection.execute(
         "SELECT 1 FROM columns WHERE board_id = ? LIMIT 1", (board["id"],)
@@ -390,6 +488,13 @@ def _insert_board(
         """,
         (board_id, user_id, title, position, utc_now(), utc_now()),
     )
+    connection.execute(
+        """
+        INSERT INTO board_members (board_id, user_id, role, created_at)
+        VALUES (?, ?, 'owner', ?)
+        """,
+        (board_id, user_id, utc_now()),
+    )
     connection.executemany(
         """
         INSERT INTO columns (id, board_id, title, position)
@@ -419,9 +524,16 @@ class BoardRepository:
             rows = connection.execute(
                 """
                 SELECT boards.id, boards.title, boards.updated_at,
-                       COUNT(cards.id) AS card_count
+                       board_members.role AS role,
+                       COUNT(DISTINCT cards.id) AS card_count,
+                       (
+                           SELECT COUNT(*)
+                           FROM board_members AS all_members
+                           WHERE all_members.board_id = boards.id
+                       ) AS member_count
                 FROM boards
-                JOIN users ON users.id = boards.user_id
+                JOIN board_members ON board_members.board_id = boards.id
+                JOIN users ON users.id = board_members.user_id
                 LEFT JOIN columns ON columns.board_id = boards.id
                 LEFT JOIN cards ON cards.column_id = columns.id
                 WHERE users.username = ?
@@ -436,6 +548,8 @@ class BoardRepository:
                 title=row["title"],
                 cardCount=row["card_count"],
                 updatedAt=row["updated_at"],
+                role=row["role"],
+                memberCount=row["member_count"],
             )
             for row in rows
         ]
@@ -468,6 +582,10 @@ class BoardRepository:
                 """,
                 (title, utc_now(), board_id, username),
             )
+            if result.rowcount == 1:
+                self._record_activity(
+                    connection, board_id, username, f'renamed the board to "{title}"'
+                )
             return result.rowcount == 1
 
     def delete_board(self, username: str, board_id: str) -> bool:
@@ -476,8 +594,10 @@ class BoardRepository:
                 """
                 SELECT boards.id
                 FROM boards
-                JOIN users ON users.id = boards.user_id
+                JOIN board_members ON board_members.board_id = boards.id
+                JOIN users ON users.id = board_members.user_id
                 WHERE boards.id = ? AND users.username = ?
+                  AND board_members.role = 'owner'
                 """,
                 (board_id, username),
             ).fetchone()
@@ -489,7 +609,8 @@ class BoardRepository:
                 """
                 SELECT COUNT(*)
                 FROM boards
-                JOIN users ON users.id = boards.user_id
+                JOIN board_members ON board_members.board_id = boards.id
+                JOIN users ON users.id = board_members.user_id
                 WHERE users.username = ?
                 """,
                 (username,),
@@ -506,7 +627,8 @@ class BoardRepository:
                 """
                 SELECT boards.id
                 FROM boards
-                JOIN users ON users.id = boards.user_id
+                JOIN board_members ON board_members.board_id = boards.id
+                JOIN users ON users.id = board_members.user_id
                 WHERE boards.id = ? AND users.username = ?
                 """,
                 (board_id, username),
@@ -527,9 +649,10 @@ class BoardRepository:
         self,
         username: str,
         operations: list[BoardOperation],
+        board_id: str | None = None,
     ) -> BoardData | None:
         with closing(connect(self.database_path)) as connection, connection:
-            board = self._get_board(connection, username)
+            board = self._get_board(connection, username, board_id)
             if board is None:
                 return None
 
@@ -607,7 +730,11 @@ class BoardRepository:
                 created_card_ids,
             )
 
-        updated_board = self.get_board(username)
+        updated_board = (
+            self.get_board_by_id(username, board_id)
+            if board_id
+            else self.get_board(username)
+        )
         if updated_board is None:
             raise BoardOperationError("Board not found")
         return updated_board
@@ -627,7 +754,8 @@ class BoardRepository:
         ).fetchall()
         cards = connection.execute(
             """
-            SELECT cards.id, cards.column_id, cards.title, cards.details
+            SELECT cards.id, cards.column_id, cards.title, cards.details,
+                   cards.due_date, cards.assignee
             FROM cards
             JOIN columns ON columns.id = cards.column_id
             WHERE columns.board_id = ?
@@ -635,16 +763,57 @@ class BoardRepository:
             """,
             (board["id"],),
         ).fetchall()
+        labels = connection.execute(
+            """
+            SELECT id, name, color
+            FROM labels
+            WHERE board_id = ?
+            ORDER BY name
+            """,
+            (board["id"],),
+        ).fetchall()
+        comment_counts = {
+            row["card_id"]: row["total"]
+            for row in connection.execute(
+                """
+                SELECT card_comments.card_id, COUNT(*) AS total
+                FROM card_comments
+                JOIN cards ON cards.id = card_comments.card_id
+                JOIN columns ON columns.id = cards.column_id
+                WHERE columns.board_id = ?
+                GROUP BY card_comments.card_id
+                """,
+                (board["id"],),
+            ).fetchall()
+        }
+        card_label_rows = connection.execute(
+            """
+            SELECT card_labels.card_id, card_labels.label_id
+            FROM card_labels
+            JOIN labels ON labels.id = card_labels.label_id
+            WHERE labels.board_id = ?
+            ORDER BY labels.name
+            """,
+            (board["id"],),
+        ).fetchall()
+
+        label_ids_by_card: dict[str, list[str]] = {}
+        for row in card_label_rows:
+            label_ids_by_card.setdefault(row["card_id"], []).append(row["label_id"])
 
         card_ids_by_column = {column["id"]: [] for column in columns}
         card_data = {}
         for card in cards:
             card_ids_by_column[card["column_id"]].append(card["id"])
-            card_data[card["id"]] = {
-                "id": card["id"],
-                "title": card["title"],
-                "details": card["details"],
-            }
+            card_data[card["id"]] = CardData(
+                id=card["id"],
+                title=card["title"],
+                details=card["details"],
+                dueDate=card["due_date"],
+                assignee=card["assignee"],
+                labelIds=label_ids_by_card.get(card["id"], []),
+                commentCount=comment_counts.get(card["id"], 0),
+            )
 
         return BoardData(
             columns=[
@@ -656,6 +825,12 @@ class BoardRepository:
                 for column in columns
             ],
             cards=card_data,
+            labels={
+                label["id"]: LabelData(
+                    id=label["id"], name=label["name"], color=label["color"]
+                )
+                for label in labels
+            },
         )
 
     @staticmethod
@@ -736,13 +911,23 @@ class BoardRepository:
                   AND board_id = (
                       SELECT boards.id
                       FROM boards
-                      JOIN users ON users.id = boards.user_id
+                      JOIN board_members ON board_members.board_id = boards.id
+                JOIN users ON users.id = board_members.user_id
                       WHERE users.username = ?
                   )
                 """,
                 (title, utc_now(), column_id, username),
             )
             if result.rowcount == 1:
+                board = connection.execute(
+                    "SELECT board_id FROM columns WHERE id = ?", (column_id,)
+                ).fetchone()
+                self._record_activity(
+                    connection,
+                    board["board_id"],
+                    username,
+                    f'renamed a column to "{title}"',
+                )
                 self._touch_board_for_column(connection, column_id)
             return result.rowcount == 1
 
@@ -752,12 +937,13 @@ class BoardRepository:
         column_id: str,
         title: str,
         details: str,
+        due_date: str | None = None,
+        assignee: str = "",
+        label_ids: list[str] | None = None,
     ) -> str | None:
         with closing(connect(self.database_path)) as connection, connection:
-            board = self._get_board(connection, username)
-            if board is None or not self._column_belongs_to_board(
-                connection, column_id, board["id"]
-            ):
+            board_id = self._column_board_id(connection, username, column_id)
+            if board_id is None:
                 return None
 
             card_id = f"card-{secrets.token_hex(8)}"
@@ -765,12 +951,23 @@ class BoardRepository:
             card_ids.append(card_id)
             connection.execute(
                 """
-                INSERT INTO cards (id, column_id, title, details, position)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO cards
+                    (id, column_id, title, details, due_date, assignee, position)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (card_id, column_id, title, details, len(card_ids) - 1),
+                (
+                    card_id,
+                    column_id,
+                    title,
+                    details,
+                    due_date,
+                    assignee,
+                    len(card_ids) - 1,
+                ),
             )
-            self._touch_board(connection, board["id"])
+            self._set_card_labels(connection, card_id, label_ids or [])
+            self._record_activity(connection, board_id, username, f'added "{title}"')
+            self._touch_board(connection, board_id)
             return card_id
 
     def update_card(
@@ -779,26 +976,358 @@ class BoardRepository:
         card_id: str,
         title: str,
         details: str,
+        due_date: str | None = None,
+        assignee: str = "",
+        label_ids: list[str] | None = None,
     ) -> bool:
         with closing(connect(self.database_path)) as connection, connection:
             result = connection.execute(
                 """
                 UPDATE cards
-                SET title = ?, details = ?, updated_at = ?
+                SET title = ?, details = ?, due_date = ?, assignee = ?,
+                    updated_at = ?
                 WHERE id = ?
                   AND column_id IN (
                       SELECT columns.id
                       FROM columns
                       JOIN boards ON boards.id = columns.board_id
-                      JOIN users ON users.id = boards.user_id
+                      JOIN board_members ON board_members.board_id = boards.id
+                JOIN users ON users.id = board_members.user_id
                       WHERE users.username = ?
                   )
                 """,
-                (title, details, utc_now(), card_id, username),
+                (title, details, due_date, assignee, utc_now(), card_id, username),
             )
             if result.rowcount == 1:
+                self._set_card_labels(connection, card_id, label_ids or [])
+                board_id = self._card_board_id(connection, username, card_id)
+                if board_id:
+                    self._record_activity(
+                        connection, board_id, username, f'updated "{title}"'
+                    )
                 self._touch_board_for_card(connection, card_id)
             return result.rowcount == 1
+
+    def create_label(
+        self, username: str, board_id: str, name: str, color: str
+    ) -> LabelData | None:
+        with closing(connect(self.database_path)) as connection, connection:
+            board = self._get_board(connection, username, board_id)
+            if board is None:
+                return None
+
+            existing = connection.execute(
+                "SELECT id, name, color FROM labels WHERE board_id = ? AND name = ?",
+                (board_id, name),
+            ).fetchone()
+            if existing is not None:
+                raise BoardOperationError("That label already exists on this board.")
+
+            label_id = f"label-{secrets.token_hex(8)}"
+            connection.execute(
+                """
+                INSERT INTO labels (id, board_id, name, color, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (label_id, board_id, name, color, utc_now()),
+            )
+            return LabelData(id=label_id, name=name, color=color)
+
+    def delete_label(self, username: str, board_id: str, label_id: str) -> bool:
+        with closing(connect(self.database_path)) as connection, connection:
+            result = connection.execute(
+                """
+                DELETE FROM labels
+                WHERE id = ?
+                  AND board_id = (
+                      SELECT boards.id
+                      FROM boards
+                      JOIN board_members ON board_members.board_id = boards.id
+                JOIN users ON users.id = board_members.user_id
+                      WHERE boards.id = ? AND users.username = ?
+                  )
+                """,
+                (label_id, board_id, username),
+            )
+            return result.rowcount == 1
+
+    def list_members(self, username: str, board_id: str) -> list[BoardMember] | None:
+        with closing(connect(self.database_path)) as connection, connection:
+            if self._get_board(connection, username, board_id) is None:
+                return None
+
+            rows = connection.execute(
+                """
+                SELECT users.username, board_members.role
+                FROM board_members
+                JOIN users ON users.id = board_members.user_id
+                WHERE board_members.board_id = ?
+                ORDER BY
+                    CASE board_members.role WHEN 'owner' THEN 0 ELSE 1 END,
+                    users.username
+                """,
+                (board_id,),
+            ).fetchall()
+        return [
+            BoardMember(username=row["username"], role=row["role"]) for row in rows
+        ]
+
+    def add_member(
+        self, username: str, board_id: str, new_member: str
+    ) -> BoardMember | None:
+        with closing(connect(self.database_path)) as connection, connection:
+            if self._board_role(connection, username, board_id) != "owner":
+                return None
+
+            user = connection.execute(
+                "SELECT id FROM users WHERE username = ?", (new_member,)
+            ).fetchone()
+            if user is None:
+                raise BoardOperationError("That user does not exist.")
+
+            existing = connection.execute(
+                "SELECT 1 FROM board_members WHERE board_id = ? AND user_id = ?",
+                (board_id, user["id"]),
+            ).fetchone()
+            if existing is not None:
+                raise BoardOperationError("That user is already on this board.")
+
+            connection.execute(
+                """
+                INSERT INTO board_members (board_id, user_id, role, created_at)
+                VALUES (?, ?, 'editor', ?)
+                """,
+                (board_id, user["id"], utc_now()),
+            )
+            self._record_activity(
+                connection, board_id, username, f"shared the board with {new_member}"
+            )
+            return BoardMember(username=new_member, role="editor")
+
+    def remove_member(self, username: str, board_id: str, member: str) -> bool:
+        with closing(connect(self.database_path)) as connection, connection:
+            role = self._board_role(connection, username, board_id)
+            # Owners can remove anyone but themselves; members can leave.
+            if role is None or (role != "owner" and member != username):
+                return False
+
+            result = connection.execute(
+                """
+                DELETE FROM board_members
+                WHERE board_id = ?
+                  AND role != 'owner'
+                  AND user_id = (SELECT id FROM users WHERE username = ?)
+                """,
+                (board_id, member),
+            )
+            if result.rowcount == 1:
+                self._record_activity(
+                    connection, board_id, username, f"removed {member} from the board"
+                )
+            return result.rowcount == 1
+
+    def list_comments(self, username: str, card_id: str) -> list[CommentData] | None:
+        with closing(connect(self.database_path)) as connection, connection:
+            if self._card_board_id(connection, username, card_id) is None:
+                return None
+
+            rows = connection.execute(
+                """
+                SELECT card_comments.id, users.username AS author,
+                       card_comments.body, card_comments.created_at
+                FROM card_comments
+                JOIN users ON users.id = card_comments.user_id
+                WHERE card_comments.card_id = ?
+                ORDER BY card_comments.created_at
+                """,
+                (card_id,),
+            ).fetchall()
+        return [
+            CommentData(
+                id=row["id"],
+                author=row["author"],
+                body=row["body"],
+                createdAt=row["created_at"],
+            )
+            for row in rows
+        ]
+
+    def add_comment(
+        self, username: str, card_id: str, body: str
+    ) -> CommentData | None:
+        with closing(connect(self.database_path)) as connection, connection:
+            board_id = self._card_board_id(connection, username, card_id)
+            if board_id is None:
+                return None
+
+            user = connection.execute(
+                "SELECT id FROM users WHERE username = ?", (username,)
+            ).fetchone()
+            comment_id = f"comment-{secrets.token_hex(8)}"
+            created_at = utc_now()
+            connection.execute(
+                """
+                INSERT INTO card_comments (id, card_id, user_id, body, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (comment_id, card_id, user["id"], body, created_at),
+            )
+            card = connection.execute(
+                "SELECT title FROM cards WHERE id = ?", (card_id,)
+            ).fetchone()
+            self._record_activity(
+                connection, board_id, username, f'commented on "{card["title"]}"'
+            )
+            return CommentData(
+                id=comment_id, author=username, body=body, createdAt=created_at
+            )
+
+    def delete_comment(self, username: str, comment_id: str) -> bool:
+        with closing(connect(self.database_path)) as connection, connection:
+            # Only the author may delete their own comment.
+            result = connection.execute(
+                """
+                DELETE FROM card_comments
+                WHERE id = ?
+                  AND user_id = (SELECT id FROM users WHERE username = ?)
+                """,
+                (comment_id, username),
+            )
+            return result.rowcount == 1
+
+    def list_activity(
+        self, username: str, board_id: str, limit: int = 50
+    ) -> list[ActivityEntry] | None:
+        with closing(connect(self.database_path)) as connection, connection:
+            if self._get_board(connection, username, board_id) is None:
+                return None
+
+            rows = connection.execute(
+                """
+                SELECT activities.id, activities.summary, activities.created_at,
+                       COALESCE(users.username, 'someone') AS actor
+                FROM activities
+                LEFT JOIN users ON users.id = activities.user_id
+                WHERE activities.board_id = ?
+                ORDER BY activities.created_at DESC, activities.id DESC
+                LIMIT ?
+                """,
+                (board_id, limit),
+            ).fetchall()
+        return [
+            ActivityEntry(
+                id=row["id"],
+                actor=row["actor"],
+                summary=row["summary"],
+                createdAt=row["created_at"],
+            )
+            for row in rows
+        ]
+
+    @staticmethod
+    def _board_role(
+        connection: sqlite3.Connection, username: str, board_id: str
+    ) -> str | None:
+        row = connection.execute(
+            """
+            SELECT board_members.role
+            FROM board_members
+            JOIN users ON users.id = board_members.user_id
+            WHERE board_members.board_id = ? AND users.username = ?
+            """,
+            (board_id, username),
+        ).fetchone()
+        return row["role"] if row else None
+
+    @staticmethod
+    def _column_board_id(
+        connection: sqlite3.Connection, username: str, column_id: str
+    ) -> str | None:
+        row = connection.execute(
+            """
+            SELECT boards.id
+            FROM columns
+            JOIN boards ON boards.id = columns.board_id
+            JOIN board_members ON board_members.board_id = boards.id
+            JOIN users ON users.id = board_members.user_id
+            WHERE columns.id = ? AND users.username = ?
+            """,
+            (column_id, username),
+        ).fetchone()
+        return row["id"] if row else None
+
+    @staticmethod
+    def _card_board_id(
+        connection: sqlite3.Connection, username: str, card_id: str
+    ) -> str | None:
+        row = connection.execute(
+            """
+            SELECT boards.id
+            FROM cards
+            JOIN columns ON columns.id = cards.column_id
+            JOIN boards ON boards.id = columns.board_id
+            JOIN board_members ON board_members.board_id = boards.id
+            JOIN users ON users.id = board_members.user_id
+            WHERE cards.id = ? AND users.username = ?
+            """,
+            (card_id, username),
+        ).fetchone()
+        return row["id"] if row else None
+
+    @staticmethod
+    def _record_activity(
+        connection: sqlite3.Connection,
+        board_id: str,
+        username: str,
+        summary: str,
+    ) -> None:
+        user = connection.execute(
+            "SELECT id FROM users WHERE username = ?", (username,)
+        ).fetchone()
+        connection.execute(
+            """
+            INSERT INTO activities (id, board_id, user_id, summary, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                f"activity-{secrets.token_hex(8)}",
+                board_id,
+                user["id"] if user else None,
+                summary,
+                utc_now(),
+            ),
+        )
+
+    @staticmethod
+    def _set_card_labels(
+        connection: sqlite3.Connection, card_id: str, label_ids: list[str]
+    ) -> None:
+        connection.execute("DELETE FROM card_labels WHERE card_id = ?", (card_id,))
+        if not label_ids:
+            return
+
+        # Only labels from the card's own board may be attached.
+        allowed = {
+            row["id"]
+            for row in connection.execute(
+                """
+                SELECT labels.id
+                FROM labels
+                JOIN columns ON columns.board_id = labels.board_id
+                JOIN cards ON cards.column_id = columns.id
+                WHERE cards.id = ?
+                """,
+                (card_id,),
+            ).fetchall()
+        }
+        unknown = [label_id for label_id in label_ids if label_id not in allowed]
+        if unknown:
+            raise BoardOperationError("Unknown label for this board")
+
+        connection.executemany(
+            "INSERT INTO card_labels (card_id, label_id) VALUES (?, ?)",
+            [(card_id, label_id) for label_id in dict.fromkeys(label_ids)],
+        )
 
     def delete_card(self, username: str, card_id: str) -> bool:
         with closing(connect(self.database_path)) as connection, connection:
@@ -808,7 +1337,8 @@ class BoardRepository:
                 FROM cards
                 JOIN columns ON columns.id = cards.column_id
                 JOIN boards ON boards.id = columns.board_id
-                JOIN users ON users.id = boards.user_id
+                JOIN board_members ON board_members.board_id = boards.id
+                JOIN users ON users.id = board_members.user_id
                 WHERE cards.id = ? AND users.username = ?
                 """,
                 (card_id, username),
@@ -828,8 +1358,14 @@ class BoardRepository:
                     (card["column_id"], card_id),
                 ).fetchall()
             ]
+            title = connection.execute(
+                "SELECT title FROM cards WHERE id = ?", (card_id,)
+            ).fetchone()["title"]
             connection.execute("DELETE FROM cards WHERE id = ?", (card_id,))
             self._set_card_order(connection, card["column_id"], remaining_ids)
+            self._record_activity(
+                connection, card["board_id"], username, f'deleted "{title}"'
+            )
             self._touch_board(connection, card["board_id"])
             return True
 
@@ -847,7 +1383,8 @@ class BoardRepository:
                 FROM cards
                 JOIN columns ON columns.id = cards.column_id
                 JOIN boards ON boards.id = columns.board_id
-                JOIN users ON users.id = boards.user_id
+                JOIN board_members ON board_members.board_id = boards.id
+                JOIN users ON users.id = board_members.user_id
                 WHERE cards.id = ? AND users.username = ?
                 """,
                 (card_id, username),
@@ -887,18 +1424,49 @@ class BoardRepository:
             self._set_card_order(connection, source_column_id, source_ids)
             if target_column_id != source_column_id:
                 self._set_card_order(connection, target_column_id, target_ids)
+            if target_column_id != source_column_id:
+                moved = connection.execute(
+                    """
+                    SELECT cards.title, columns.title AS column_title
+                    FROM cards
+                    JOIN columns ON columns.id = ?
+                    WHERE cards.id = ?
+                    """,
+                    (target_column_id, card_id),
+                ).fetchone()
+                self._record_activity(
+                    connection,
+                    card["board_id"],
+                    username,
+                    f'moved "{moved["title"]}" to {moved["column_title"]}',
+                )
             self._touch_board(connection, card["board_id"])
             return True
 
     @staticmethod
     def _get_board(
-        connection: sqlite3.Connection, username: str
+        connection: sqlite3.Connection,
+        username: str,
+        board_id: str | None = None,
     ) -> sqlite3.Row | None:
+        if board_id is not None:
+            return connection.execute(
+                """
+                SELECT boards.id
+                FROM boards
+                JOIN board_members ON board_members.board_id = boards.id
+                JOIN users ON users.id = board_members.user_id
+                WHERE boards.id = ? AND users.username = ?
+                """,
+                (board_id, username),
+            ).fetchone()
+
         return connection.execute(
             """
             SELECT boards.id
             FROM boards
-            JOIN users ON users.id = boards.user_id
+            JOIN board_members ON board_members.board_id = boards.id
+            JOIN users ON users.id = board_members.user_id
             WHERE users.username = ?
             ORDER BY boards.position, boards.created_at
             LIMIT 1
