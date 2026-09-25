@@ -5,7 +5,7 @@
 - Docker with Docker Compose support
 - A project-root `.env` file. Copy `.env.example` to `.env` if needed.
 
-The OpenRouter key is read from `.env` and passed into the container for the Part 8 connectivity route. Do not commit `.env` or print the key in logs.
+The OpenRouter key is read from `.env` and passed into the container for the AI routes. Do not commit `.env` or print the key in logs.
 
 ## Start and stop
 
@@ -20,41 +20,70 @@ On Windows, run `scripts\\start.bat` and `scripts\\stop.bat`.
 
 The application is available at [http://127.0.0.1:3000](http://127.0.0.1:3000). The `APP_PORT` environment variable changes the host port.
 
-## Part 3 smoke checks
+## Smoke checks
 
 - `GET /` serves the statically exported Next.js Kanban application.
 - Next.js assets are served by FastAPI from the exported `out/` directory.
 - `GET /api/health` returns `{ "status": "ok" }`.
 - Authenticated `GET /api/example` returns `{ "message": "hello world" }`.
 
-## Part 4 authentication checks
+## Data and persistence
 
-- Open `/` and confirm the sign-in form appears before the board.
-- Sign in with username `user` and password `password`.
-- Confirm the board appears and a `Log out` button is available.
-- Log out and reload `/`; confirm the sign-in form appears again.
-- Try an incorrect password and confirm an error is shown without revealing which credential was wrong.
-
-## Part 6 board API checks
-
-- The SQLite database is created and seeded automatically in the persistent `kanban-data` volume.
-- Authenticated `GET /api/board` returns the five-column demo board.
-- Board mutations use the authenticated API routes under `/api/board`; changes remain after restarting the container.
-- The stop command retains the named SQLite volume. Remove it only when intentionally resetting local board data.
-- The container runs as the non-root user `app` (uid 10001). A `kanban-data` volume created by an older, root-only image is not writable by that user; fix it once, with the stack stopped, before starting again:
+- The SQLite database is created and seeded automatically in the persistent
+  `kanban-data` volume, and `GET /api/health` returns `{ "status": "ok" }`.
+- Board changes go through the authenticated API and survive a container restart.
+- `./scripts/stop.sh` keeps the named volume. Remove it only when intentionally
+  resetting local board data.
+- The container runs as the non-root user `app` (uid 10001). A `kanban-data` volume
+  created by an older, root-only image is not writable by that user; fix it once,
+  with the stack stopped, before starting again:
 
   ```bash
   docker compose run --rm --user root --entrypoint sh app -c 'chown -R app:app /app/data'
   ```
 
-## Part 7 persistence checks
+- The schema migrates itself on startup: earlier databases gain multiple boards per
+  user, card due dates and assignees, labels, sharing, comments, activity, and board
+  archiving without losing data.
 
-- Sign in and wait for the board to load from the backend.
-- Rename a column, add a card, edit it, remove it, and move a card between columns.
-- Reload the page after each change and confirm the latest board state remains.
-- If a request fails, confirm the visible board state is restored and an error is shown.
+## Accounts
 
-## Part 8 OpenRouter check
+- Open `/`. The sign-in form appears before any board.
+- `Create an account` registers a new user (3+ characters, password 8+) and opens a
+  starter board. A taken username is reported without saying whether the password
+  was right.
+- The seeded demo account is `user` / `password`.
+- Sessions live in SQLite, so a container restart no longer signs everyone out.
+
+## Boards
+
+- The board switcher lists your boards with their card counts. `New board` creates
+  one from a template: `kanban` (five columns), `sprint` (four), or `blank`.
+- The active board can be renamed, archived, or deleted. Archiving hides a board
+  until `Show archived` is ticked; the last remaining board cannot be deleted.
+- Columns can be added, moved with `Left`/`Right`, and deleted. Deleting names how
+  many cards go with it, and a board always keeps one column.
+
+## Cards
+
+- Click a card title to open its detail dialog: a Markdown description, due date,
+  assignee, labels, a checklist, and comments. Editing happens here.
+- Checklist steps can be ticked off; the card face shows progress such as `1/2 done`.
+- Cards can be dragged between columns, or moved with the keyboard: focus a card,
+  press Space, use the arrow keys, then press Space again.
+- The toolbar filters by text, by label, and by due date (overdue, due within seven
+  days, or no due date). `/` jumps to the search box and Escape clears it.
+- `My work` lists cards assigned to you across every board you belong to, soonest
+  due date first, and opens one straight from the list.
+
+## Sharing
+
+- `Sharing and activity` shows the board's members and its recent history.
+- The owner can invite another registered user by username and remove members.
+  Members can leave a board themselves but cannot remove anyone else.
+- Every change is recorded in the activity log, including changes the assistant makes.
+
+## OpenRouter checks
 
 - Sign in before calling the protected `POST /api/ai/connectivity` route.
 - With a configured key, the route sends `2+2` to OpenRouter using `openai/gpt-oss-120b` and returns the provider response.
@@ -68,7 +97,7 @@ set +a
 RUN_LIVE_OPENROUTER_TESTS=1 uv run --project backend pytest backend/tests/test_openrouter.py -k live
 ```
 
-## Part 9 structured AI chat check
+## AI chat checks
 
 - Sign in before calling the protected `POST /api/ai/chat` route.
 - Send a question and, optionally, request-scoped conversation history. The response includes the assistant text, an `updated` flag, and the resulting board.
@@ -79,11 +108,16 @@ Example request body:
 ```json
 {
   "question": "Move the roadmap themes card to review.",
-  "history": []
+  "history": [],
+  "board_id": "board-..."
 }
 ```
 
-## Part 11 floating assistant check
+The assistant can add, edit, move, and delete cards, set due dates, assignees, and
+existing labels, and break a card into checklist steps. An edit only changes the fields it mentions, so asking it to
+rename a card leaves that card's due date and assignee alone.
+
+## Assistant behavior checks
 
 - Sign in and confirm the fixed assistant launcher appears in the lower-right corner without taking space from the board.
 - Click the launcher and confirm the `Ask the board` dialog appears above the board in the lower-right corner.

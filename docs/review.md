@@ -12,7 +12,7 @@ Verification performed:
 
 Relationship to `docs/code_review.md`: most findings from that earlier review are still present in the code. They are restated here so this document stands alone; items new to this review are marked **(new)**.
 
-Overall: a clean, well-tested MVP with sound structure and correct security basics. Every finding in this review has since been fixed, except three low-severity items marked NOT FIXED (the in-memory session store's restart/multi-worker limits, a Starlette deprecation warning that needs an upstream fix, and `allowJs`, which Next.js re-adds to `tsconfig.json`).
+Overall: a clean, well-tested MVP with sound structure and correct security basics. Every finding in this review has since been fixed, except two low-severity items marked NOT FIXED (the in-memory session store's restart/multi-worker limits, since addressed by moving sessions into SQLite, and `allowJs`, which Next.js re-adds to `tsconfig.json`).
 
 ## High severity
 
@@ -88,7 +88,7 @@ Overall: a clean, well-tested MVP with sound structure and correct security basi
 
 ## Low severity
 
-All items below are fixed except the three marked NOT FIXED.
+All items below are fixed except the two marked NOT FIXED.
 
 ### Backend
 
@@ -101,7 +101,7 @@ All items below are fixed except the three marked NOT FIXED.
 - FIXED (`MAX_TEXT_LENGTH` 2000 on every title/details/question/message, `MAX_HISTORY_MESSAGES` 50; over-limit requests get 422. Test: `test_chat_rejects_oversized_input`). Was: no length limits on `question`, `history`, or card text; an arbitrarily large history becomes an arbitrarily large (and billed) prompt.
 - NOT FIXED, except that `create_session` now purges expired entries. Restart loss and multi-worker sharing are inherent to the in-memory store and out of scope for the single-worker MVP. Was: in-memory sessions are lost on restart and not shared across workers; expired sessions are only purged when replayed. Fine for the local MVP.
 - FIXED (`session_cookie_is_secure()` reads `SESSION_COOKIE_SECURE`, defaulting to off for local HTTP). Was: `secure=False` is correct for local HTTP but must change behind TLS.
-- NOT FIXED: needs an upstream move to `httpx2` in Starlette's TestClient; nothing to change here yet. Was: test run emits a Starlette deprecation warning about `httpx` in `TestClient`; worth tracking before the next FastAPI/Starlette upgrade. **(new)**
+- FIXED in Phase 8 (Starlette 1.7 plus `httpx2` as a dev dependency; the test run is warning-free). Was: test run emits a Starlette deprecation warning about `httpx` in `TestClient`; worth tracking before the next FastAPI/Starlette upgrade. **(new)**
 
 ### Frontend
 

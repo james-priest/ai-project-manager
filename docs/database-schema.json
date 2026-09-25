@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "purpose": "SQLite storage design for the Project Management MVP",
   "storage": {
     "engine": "SQLite",
@@ -67,6 +67,12 @@
           "default": 0,
           "check": "position >= 0",
           "purpose": "Order of the board in the owner's board list"
+        },
+        {
+          "name": "archived_at",
+          "type": "TEXT",
+          "nullable": true,
+          "purpose": "Set when the board is archived; archived boards are hidden from the default listing"
         },
         {
           "name": "created_at",
@@ -461,6 +467,56 @@
           ],
           "references": "users(id)",
           "on_delete": "SET NULL"
+        }
+      ]
+    },
+    {
+      "name": "checklist_items",
+      "purpose": "Steps on a card, ordered within the card",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": true
+        },
+        {
+          "name": "card_id",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "text",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "done",
+          "type": "INTEGER",
+          "nullable": false,
+          "default": 0,
+          "check": "done IN (0, 1)"
+        },
+        {
+          "name": "position",
+          "type": "INTEGER",
+          "nullable": false,
+          "check": "position >= 0"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "card_id"
+          ],
+          "references": "cards(id)",
+          "on_delete": "CASCADE"
         }
       ]
     }

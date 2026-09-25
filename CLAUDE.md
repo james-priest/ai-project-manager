@@ -19,9 +19,9 @@ Backend module boundaries (`backend/app/`):
 - `main.py` — creates the `FastAPI` app, wires the lifespan (DB init) and static-file serving, includes the route modules. No business logic.
 - `config.py` — environment-derived settings: database path resolution, static-dir resolution (`FRONTEND_STATIC_DIR` vs. the placeholder), session cookie name/lifetime, and whether the session cookie is marked secure.
 - `dependencies.py` — shared FastAPI dependencies: `get_current_user` (session-cookie auth backed by the `sessions` table), `get_session_repository`, `get_user_repository`, `get_board_repository`, `get_ai_provider`.
-- `routes/` — one router module per resource: `health.py`, `auth.py` (register/login/logout/me/example), `boards.py` (board CRUD, labels, members, activity), `board.py` (cards, columns, comments), `ai.py` (connectivity + chat). Routes depend on `dependencies.py`, never construct repositories/providers inline.
+- `routes/` — one router module per resource: `health.py`, `auth.py` (register/login/logout/me/example), `boards.py` (board CRUD, labels, members, activity, `/api/me/tasks`), `board.py` (cards, columns, comments, checklists), `ai.py` (connectivity + chat). Routes depend on `dependencies.py`, never construct repositories/providers inline.
 - `database.py` — SQLite schema init/migration/seed, `UserRepository`, `SessionRepository`, and `BoardRepository` (all board reads/mutations; enforces ownership and ordering, rewrites affected positions in one transaction per mutation via a shared `_insert_card_at_position` helper).
-- `ai.py` — builds the AI prompt from board state, strictly parses/validates the model's response into board operations, applies them via `BoardRepository`.
+- `ai.py` — builds the AI prompt from board state (including today's date and the board's labels), strictly parses/validates the model's response into board operations (`create_card`, `edit_card`, `move_card`, `delete_card`, `add_checklist`, with due dates, assignees, and label ids), applies them via `BoardRepository`. An `edit_card` only changes the fields it mentions.
 - `openrouter.py` — `AIProvider` interface and `OpenRouterClient` implementation (model: `openai/gpt-oss-120b`), translates transport/provider errors into typed exceptions (`OpenRouterConfigurationError`, `OpenRouterTimeoutError`, `OpenRouterProviderError`) that the route modules map to HTTP status codes.
 - `schemas.py` — Pydantic request/response models shared by routes.
 
@@ -29,8 +29,8 @@ The API always returns/consumes the full `BoardData` shape (columns with ordered
 
 Frontend module boundaries (`frontend/src/`):
 - `app/` — layout, page (renders `AuthGate`), global styles.
-- `components/` — `AuthGate` (owns the board list, active board, and session state), `LoginForm` (sign in or register), `BoardSwitcher` (select/create/rename/delete boards), `BoardToolbar` (search, label filters, label management), `KanbanBoard` (holds working board state), `CardLabel`, column/card/drag-preview/new-card components, `AIChatSidebar` (fixed launcher + draggable/resizable chat dialog, sends request-scoped conversation history).
-- `lib/kanban.ts` — pure `Card`/`Column`/`Label`/`BoardData` types, board transforms, and the `filterBoard` search/label filter; keep board logic here, not in components.
+- `components/` — `AuthGate` (owns the board list, active board, and session state), `LoginForm` (sign in or register), `BoardSwitcher` (select/create/rename/delete/archive boards, pick a template), `BoardToolbar` (search, label filters, label management), `KanbanBoard` (holds working board state), `CardDetailDialog` (markdown description, card fields, checklist, comments; the only place cards are edited), `MyWorkPanel` (cards assigned to you across boards), `CollaborationPanel` (members + activity), `CardComments`, `CardLabel`, column/card/drag-preview/new-card/new-column components, `AIChatSidebar` (fixed launcher + draggable/resizable chat dialog, sends request-scoped conversation history).
+- `lib/kanban.ts` — pure `Card`/`Column`/`Label`/`BoardData` types, board transforms, the `filterBoard` search/label filter, and `resolveCardDrop` (what a drag means for the board); keep board logic here, not in components.
 - `lib/api.ts` — typed same-origin API client (auth, boards, board contents, AI chat).
 
 ## Commands
@@ -71,7 +71,7 @@ npm run test:e2e       # Playwright; starts full Docker Compose app by default
 npm run test:all       # coverage + e2e
 ```
 
-Playwright: set `PLAYWRIGHT_BASE_URL` to target an already-running server instead of Docker Compose; set `PLAYWRIGHT_CHANNEL=chrome` to use an installed system Chrome instead of the bundled browser.
+Playwright: set `PLAYWRIGHT_BASE_URL` to target an already-running server instead of Docker Compose (run `npm run build` first when that server serves the local `out/`, or the tests run against a stale export; note `next build` prints "Compiled successfully" before type checking, so check its exit code); set `PLAYWRIGHT_CHANNEL=chrome` to use an installed system Chrome instead of the bundled browser.
 
 ## Conventions
 
@@ -79,5 +79,5 @@ Playwright: set `PLAYWRIGHT_BASE_URL` to target an already-running server instea
 - When debugging, find the root cause before applying a fix — don't guess.
 - No emojis, anywhere.
 - Backend: keep persistent board behavior in `BoardRepository`, not in routes. Keep auth/ownership checks server-side — never trust a client-supplied user ID. Board access goes through `board_members`; owner-only actions check `role = 'owner'`. Tests must use temporary SQLite databases, never the developer's local DB. Never log `OPENROUTER_API_KEY`.
-- Frontend: keep board transform logic in `src/lib/`, not in component render logic. Use accessible labels/roles on controls (both users and Playwright tests rely on them). Add unit/component tests for new behavior and Playwright coverage for new end-to-end journeys.
+- Frontend: keep board transform logic in `src/lib/`, not in component render logic. Playwright specs register their own account through `tests/support/workspace.ts` rather than sharing the seeded demo board. Use accessible labels/roles on controls (both users and Playwright tests rely on them). Add unit/component tests for new behavior and Playwright coverage for new end-to-end journeys.
 - Visual system colors (`frontend/src/app/globals.css`): accent yellow `#ecad0a`, blue `#209dd7`, purple `#753991` (submit/important actions), navy `#032147` (headings), gray `#888888` (supporting text).
