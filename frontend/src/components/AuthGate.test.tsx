@@ -25,6 +25,9 @@ const signedInRoutes = (): Record<string, RouteHandler> => ({
   "/api/boards/board-1": () => ok(testBoard),
   "/api/boards/board-2": () => ok({ columns: [], cards: {}, labels: {} }),
   "/api/auth/logout": () => ok({ authenticated: false }),
+  "/api/me/tasks": () => ok([]),
+  "/api/boards/board-1/members": () => ok([{ username: "user", role: "owner" }]),
+  "/api/boards/board-2/members": () => ok([{ username: "user", role: "owner" }]),
 });
 
 describe("AuthGate", () => {
@@ -172,6 +175,7 @@ describe("AuthGate", () => {
             updatedAt: "2026-01-03T00:00:00+00:00",
             role: "owner" as const,
             memberCount: 1,
+            archived: false,
           };
           summaries.push(created);
           return ok(created);
@@ -194,7 +198,7 @@ describe("AuthGate", () => {
       "/api/boards",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ title: "Hiring" }),
+        body: JSON.stringify({ title: "Hiring", template: "kanban" }),
       })
     );
   });
@@ -224,6 +228,48 @@ describe("AuthGate", () => {
       "That board already exists."
     );
     expect(screen.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+  });
+
+  it("opens a task from My work on another board", async () => {
+    const fetchMock = stubApi({
+      ...signedInRoutes(),
+      "/api/me/tasks": () =>
+        ok([
+          {
+            cardId: "card-3",
+            title: "Prototype analytics view",
+            boardId: "board-2",
+            boardTitle: "Launch plan",
+            columnTitle: "Backlog",
+            dueDate: null,
+            labels: [],
+          },
+        ]),
+      "/api/boards/board-2": () => ok(testBoard),
+    });
+    const user = userEvent.setup();
+
+    render(<AuthGate />);
+    await screen.findByRole("heading", { name: "Kanban Studio" });
+
+    await user.click(screen.getByRole("button", { name: /My work/ }));
+    // The same title also exists as a card on the board, so scope the click.
+    const taskList = await screen.findByRole("list", { name: "Assigned cards" });
+    await user.click(
+      within(taskList).getByRole("button", { name: /Prototype analytics view/ })
+    );
+
+    // It switches board and opens that card's details.
+    expect(
+      await screen.findByRole("heading", { name: "Launch plan" })
+    ).toBeVisible();
+    expect(await screen.findByRole("dialog")).toHaveAccessibleName(
+      "Card details for Prototype analytics view"
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/boards/board-2",
+      expect.objectContaining({ credentials: "same-origin" })
+    );
   });
 
   it("logs out and returns to the login form", async () => {

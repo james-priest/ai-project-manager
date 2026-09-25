@@ -2,7 +2,6 @@ import clsx from "clsx";
 import { useEffect, useRef, useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import type { CardFields } from "@/lib/api";
 import type { Card, Column, Label } from "@/lib/kanban";
 import { KanbanCard } from "@/components/KanbanCard";
 import { NewCardForm } from "@/components/NewCardForm";
@@ -12,19 +11,17 @@ type KanbanColumnProps = {
   cards: Card[];
   labels: Label[];
   today: string;
-  onCommentsChanged: () => void;
+  index: number;
+  columnCount: number;
+  onMoveColumn: (columnId: string, position: number) => void | Promise<void>;
+  onDeleteColumn: (columnId: string) => void | Promise<void>;
   onRename: (columnId: string, title: string) => void | Promise<void>;
   onAddCard: (
     columnId: string,
     title: string,
     details: string
   ) => void | Promise<void>;
-  onEditCard: (
-    cardId: string,
-    title: string,
-    details: string,
-    fields: CardFields
-  ) => void | Promise<void>;
+  onOpenCard: (cardId: string) => void;
   onDeleteCard: (columnId: string, cardId: string) => void | Promise<void>;
 };
 
@@ -33,15 +30,19 @@ export const KanbanColumn = ({
   cards,
   labels,
   today,
-  onCommentsChanged,
+  index,
+  columnCount,
+  onMoveColumn,
+  onDeleteColumn,
   onRename,
   onAddCard,
-  onEditCard,
+  onOpenCard,
   onDeleteCard,
 }: KanbanColumnProps) => {
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
   const [draftTitle, setDraftTitle] = useState(column.title);
   const [isSavingTitle, setIsSavingTitle] = useState(false);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const cancelTitleEditRef = useRef(false);
 
@@ -114,6 +115,53 @@ export const KanbanColumn = ({
             className="mt-3 w-full bg-transparent font-display text-lg font-semibold text-[var(--navy-dark)] outline-none"
             aria-label={`Column title: ${column.title}`}
           />
+          <div className="mt-2 flex flex-wrap items-center gap-1">
+            <button
+              type="button"
+              onClick={() => void onMoveColumn(column.id, index - 1)}
+              disabled={index === 0}
+              aria-label={`Move ${column.title} left`}
+              title={`Move ${column.title} left`}
+              className="rounded-full px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--gray-text)] transition hover:text-[var(--navy-dark)] disabled:opacity-40"
+            >
+              Left
+            </button>
+            <button
+              type="button"
+              onClick={() => void onMoveColumn(column.id, index + 1)}
+              disabled={index === columnCount - 1}
+              aria-label={`Move ${column.title} right`}
+              title={`Move ${column.title} right`}
+              className="rounded-full px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--gray-text)] transition hover:text-[var(--navy-dark)] disabled:opacity-40"
+            >
+              Right
+            </button>
+            {columnCount > 1 &&
+              (isConfirmingDelete ? (
+                <button
+                  type="button"
+                  onClick={() => void onDeleteColumn(column.id)}
+                  onBlur={() => setIsConfirmingDelete(false)}
+                  autoFocus
+                  aria-label={`Confirm delete ${column.title}`}
+                  className="rounded-full border border-red-300 px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-wide text-red-700 transition hover:bg-red-50"
+                >
+                  {cards.length > 0
+                    ? `Delete ${cards.length} cards?`
+                    : "Confirm"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsConfirmingDelete(true)}
+                  aria-label={`Delete ${column.title}`}
+                  title={`Delete ${column.title}`}
+                  className="rounded-full px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--gray-text)] transition hover:text-red-700"
+                >
+                  Delete
+                </button>
+              ))}
+          </div>
         </div>
       </div>
       <div className="mt-4 flex flex-1 flex-col gap-3">
@@ -124,8 +172,7 @@ export const KanbanColumn = ({
               card={card}
               labels={labels}
               today={today}
-              onCommentsChanged={onCommentsChanged}
-              onEdit={onEditCard}
+              onOpen={onOpenCard}
               onDelete={(cardId) => onDeleteCard(column.id, cardId)}
             />
           ))}

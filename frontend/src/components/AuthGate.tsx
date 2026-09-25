@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { KanbanBoard } from "@/components/KanbanBoard";
 import { LoginForm } from "@/components/LoginForm";
-import { ApiError, api, type BoardSummary } from "@/lib/api";
+import {
+  ApiError,
+  api,
+  type BoardSummary,
+  type BoardTemplate,
+} from "@/lib/api";
 import type { BoardData } from "@/lib/kanban";
 
 type WorkspaceState =
@@ -19,6 +24,8 @@ export const AuthGate = () => {
   const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
   const [board, setBoard] = useState<BoardData | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [pendingCardId, setPendingCardId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleLoadError = useCallback((loadError: unknown) => {
@@ -42,7 +49,7 @@ export const AuthGate = () => {
       setError(null);
 
       try {
-        const nextBoards = await api.listBoards();
+        const nextBoards = await api.listBoards(showArchived);
         const nextBoardId =
           nextBoards.find((summary) => summary.id === preferredBoardId)?.id ??
           nextBoards[0]?.id;
@@ -58,7 +65,7 @@ export const AuthGate = () => {
         handleLoadError(loadError);
       }
     },
-    [handleLoadError]
+    [handleLoadError, showArchived]
   );
 
   useEffect(() => {
@@ -94,11 +101,28 @@ export const AuthGate = () => {
     if (boardId === activeBoardId) {
       return;
     }
+    setPendingCardId(null);
     await runBoardAction(async () => boardId);
   };
 
-  const handleCreateBoard = async (title: string) => {
-    await runBoardAction(async () => (await api.createBoard(title)).id);
+  // Opening a task from "My work" may mean switching boards first.
+  const handleOpenTask = async (boardId: string, cardId: string) => {
+    setPendingCardId(cardId);
+    if (boardId !== activeBoardId) {
+      await runBoardAction(async () => boardId);
+    }
+  };
+
+  const handleCreateBoard = async (title: string, template: BoardTemplate) => {
+    await runBoardAction(async () => (await api.createBoard(title, template)).id);
+  };
+
+  const handleArchiveBoard = async (boardId: string, archived: boolean) => {
+    await runBoardAction(async () => {
+      await api.archiveBoard(boardId, archived);
+      // An archived board drops out of the list unless archived are shown.
+      return archived && !showArchived ? undefined : boardId;
+    });
   };
 
   const handleRenameBoard = async (boardId: string, title: string) => {
@@ -175,14 +199,19 @@ export const AuthGate = () => {
       )}
       {board && activeBoardId && (
         <KanbanBoard
-          key={activeBoardId}
+          key={`${activeBoardId}:${pendingCardId ?? ""}`}
           boardId={activeBoardId}
           initialBoard={board}
+          initialOpenCardId={pendingCardId}
+          onOpenTask={handleOpenTask}
           boards={boards}
           onSelectBoard={handleSelectBoard}
           onCreateBoard={handleCreateBoard}
           onRenameBoard={handleRenameBoard}
           onDeleteBoard={handleDeleteBoard}
+          onArchiveBoard={handleArchiveBoard}
+          showArchivedBoards={showArchived}
+          onShowArchivedBoardsChange={setShowArchived}
           onLogout={handleLogout}
           isLoggingOut={isLoggingOut}
           onSessionExpired={handleSessionExpired}

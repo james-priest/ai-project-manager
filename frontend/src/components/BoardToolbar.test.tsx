@@ -37,7 +37,7 @@ describe("BoardToolbar", () => {
 
   it("reports how many cards a filter leaves visible", () => {
     renderToolbar({
-      filters: { query: "ship", labelIds: [] },
+      filters: { query: "ship", labelIds: [], due: "any" },
       visibleCount: 2,
     });
 
@@ -49,7 +49,11 @@ describe("BoardToolbar", () => {
 
     await userEvent.type(screen.getByLabelText("Search cards"), "s");
 
-    expect(onFiltersChange).toHaveBeenCalledWith({ query: "s", labelIds: [] });
+    expect(onFiltersChange).toHaveBeenCalledWith({
+      query: "s",
+      labelIds: [],
+      due: "any",
+    });
   });
 
   it("adds a label to the filter", async () => {
@@ -63,12 +67,13 @@ describe("BoardToolbar", () => {
     expect(onFiltersChange).toHaveBeenCalledWith({
       query: "",
       labelIds: ["label-urgent"],
+      due: "any",
     });
   });
 
   it("removes a label that is already filtered", async () => {
     const { onFiltersChange } = renderToolbar({
-      filters: { query: "", labelIds: ["label-urgent"] },
+      filters: { query: "", labelIds: ["label-urgent"], due: "any" },
     });
 
     const urgent = screen.getByRole("button", { name: "Urgent" });
@@ -76,17 +81,17 @@ describe("BoardToolbar", () => {
 
     await userEvent.click(urgent);
 
-    expect(onFiltersChange).toHaveBeenCalledWith({ query: "", labelIds: [] });
+    expect(onFiltersChange).toHaveBeenCalledWith({ query: "", labelIds: [], due: "any" });
   });
 
   it("clears every filter", async () => {
     const { onFiltersChange } = renderToolbar({
-      filters: { query: "ship", labelIds: ["label-urgent"] },
+      filters: { query: "ship", labelIds: ["label-urgent"], due: "any" },
     });
 
     await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
 
-    expect(onFiltersChange).toHaveBeenCalledWith({ query: "", labelIds: [] });
+    expect(onFiltersChange).toHaveBeenCalledWith({ query: "", labelIds: [], due: "any" });
   });
 
   it("creates a label with the chosen color", async () => {
@@ -125,5 +130,80 @@ describe("BoardToolbar", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Labels" }));
     expect(screen.queryByLabelText("New label name")).not.toBeInTheDocument();
+  });
+});
+
+describe("BoardToolbar keyboard and empty states", () => {
+  it("focuses search when / is pressed", async () => {
+    renderToolbar();
+    const search = screen.getByLabelText("Search cards");
+    expect(search).not.toHaveFocus();
+
+    await userEvent.keyboard("/");
+
+    expect(search).toHaveFocus();
+  });
+
+  it("ignores / while typing somewhere else", async () => {
+    renderToolbar();
+    const search = screen.getByLabelText("Search cards");
+
+    await userEvent.click(screen.getByRole("button", { name: "Labels" }));
+    const labelName = screen.getByLabelText("New label name");
+    await userEvent.type(labelName, "a/b");
+
+    expect(labelName).toHaveValue("a/b");
+    expect(search).not.toHaveFocus();
+  });
+
+  it("clears the query with Escape", async () => {
+    const { onFiltersChange } = renderToolbar({
+      filters: { query: "ship", labelIds: [], due: "any" },
+    });
+
+    await userEvent.click(screen.getByLabelText("Search cards"));
+    await userEvent.keyboard("{Escape}");
+
+    expect(onFiltersChange).toHaveBeenCalledWith({ query: "", labelIds: [], due: "any" });
+  });
+
+  it("announces the visible count politely", () => {
+    renderToolbar({ filters: { query: "ship", labelIds: [], due: "any" }, visibleCount: 2 });
+
+    expect(screen.getByText("2 of 8 cards")).toHaveAttribute(
+      "aria-live",
+      "polite"
+    );
+  });
+});
+
+describe("BoardToolbar due filter", () => {
+  it("offers the due date choices", async () => {
+    const { onFiltersChange } = renderToolbar();
+
+    await userEvent.selectOptions(
+      screen.getByLabelText("Due date filter"),
+      "overdue"
+    );
+
+    expect(onFiltersChange).toHaveBeenCalledWith({
+      query: "",
+      labelIds: [],
+      due: "overdue",
+    });
+  });
+
+  it("clears a due filter along with the rest", async () => {
+    const { onFiltersChange } = renderToolbar({
+      filters: { query: "", labelIds: [], due: "week" },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    expect(onFiltersChange).toHaveBeenCalledWith({
+      query: "",
+      labelIds: [],
+      due: "any",
+    });
   });
 });

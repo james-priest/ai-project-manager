@@ -6,6 +6,8 @@ export type Card = {
   assignee: string;
   labelIds: string[];
   commentCount: number;
+  checklistDone: number;
+  checklistTotal: number;
 };
 
 export type Label = {
@@ -36,17 +38,49 @@ export type BoardData = {
   labels: Record<string, Label>;
 };
 
+export const DUE_FILTERS = ["any", "overdue", "week", "none"] as const;
+
+export type DueFilter = (typeof DUE_FILTERS)[number];
+
 export type BoardFilters = {
   query: string;
   labelIds: string[];
+  due: DueFilter;
 };
 
-export const emptyFilters: BoardFilters = { query: "", labelIds: [] };
+export const emptyFilters: BoardFilters = {
+  query: "",
+  labelIds: [],
+  due: "any",
+};
 
 export const hasActiveFilters = (filters: BoardFilters) =>
-  filters.query.trim().length > 0 || filters.labelIds.length > 0;
+  filters.query.trim().length > 0 ||
+  filters.labelIds.length > 0 ||
+  filters.due !== "any";
 
-const matchesFilters = (card: Card, filters: BoardFilters) => {
+const addDays = (isoDate: string, days: number) => {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+};
+
+const matchesDue = (card: Card, due: DueFilter, today: string) => {
+  if (due === "any") {
+    return true;
+  }
+  if (due === "none") {
+    return card.dueDate === null;
+  }
+  if (card.dueDate === null) {
+    return false;
+  }
+  return due === "overdue"
+    ? card.dueDate < today
+    : card.dueDate <= addDays(today, 7);
+};
+
+const matchesFilters = (card: Card, filters: BoardFilters, today: string) => {
   const query = filters.query.trim().toLowerCase();
   const matchesQuery =
     !query ||
@@ -57,14 +91,15 @@ const matchesFilters = (card: Card, filters: BoardFilters) => {
     filters.labelIds.length === 0 ||
     filters.labelIds.every((labelId) => card.labelIds.includes(labelId));
 
-  return matchesQuery && matchesLabels;
+  return matchesQuery && matchesLabels && matchesDue(card, filters.due, today);
 };
 
 // Hides cards that do not match, leaving columns in place so the board keeps
 // its shape (and drop targets) while a filter is active.
 export const filterBoard = (
   board: BoardData,
-  filters: BoardFilters
+  filters: BoardFilters,
+  today: string
 ): BoardData => {
   if (!hasActiveFilters(filters)) {
     return board;
@@ -75,7 +110,7 @@ export const filterBoard = (
     columns: board.columns.map((column) => ({
       ...column,
       cardIds: column.cardIds.filter((cardId) =>
-        matchesFilters(board.cards[cardId], filters)
+        matchesFilters(board.cards[cardId], filters, today)
       ),
     })),
   };
@@ -225,3 +260,66 @@ export const insertCard = (
     return { ...column, cardIds };
   }),
 });
+
+export type CardDrop = {
+  activeId: string;
+  fromColumnId: string;
+  fromPosition: number;
+  toColumnId: string;
+  toPosition: number;
+};
+
+export type DropRequest = {
+  activeId: string;
+  overId: string;
+  isKeyboardDrag: boolean;
+  activeRect?: DropRect;
+  overRect?: DropRect;
+};
+
+/**
+ * Works out what a drag means for the board, or null when it changes nothing.
+ *
+ * Keeping this here rather than in the component makes every branch - unknown
+ * ids, pointer versus keyboard placement, and same-place drops - testable
+ * without simulating a drag.
+ */
+export const resolveCardDrop = (
+  board: BoardData,
+  { activeId, overId, isKeyboardDrag, activeRect, overRect }: DropRequest
+): CardDrop | null => {
+  if (activeId === overId) {
+    return null;
+  }
+
+  const fromColumn = findCardColumn(board.columns, activeId);
+  const toColumn = findCardColumn(board.columns, overId);
+  if (!fromColumn || !toColumn) {
+    return null;
+  }
+
+  const isOverColumn = overId === toColumn.id;
+  const toPosition = isKeyboardDrag
+    ? getKeyboardDropPosition(toColumn.cardIds, activeId, overId, isOverColumn)
+    : getCardDropPosition(
+        toColumn.cardIds,
+        activeId,
+        overId,
+        isOverColumn,
+        activeRect,
+        overRect
+      );
+
+  const fromPosition = fromColumn.cardIds.indexOf(activeId);
+  if (toColumn.id === fromColumn.id && toPosition === fromPosition) {
+    return null;
+  }
+
+  return {
+    activeId,
+    fromColumnId: fromColumn.id,
+    fromPosition,
+    toColumnId: toColumn.id,
+    toPosition,
+  };
+};

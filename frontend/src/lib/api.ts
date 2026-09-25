@@ -1,4 +1,4 @@
-import type { BoardData, Label, LabelColor } from "@/lib/kanban";
+import type { BoardData, Column, Label, LabelColor } from "@/lib/kanban";
 
 export type CardFields = {
   dueDate: string | null;
@@ -22,7 +22,12 @@ export type BoardSummary = {
   updatedAt: string;
   role: "owner" | "editor";
   memberCount: number;
+  archived: boolean;
 };
+
+export const BOARD_TEMPLATES = ["kanban", "sprint", "blank"] as const;
+
+export type BoardTemplate = (typeof BOARD_TEMPLATES)[number];
 
 export type BoardMember = {
   username: string;
@@ -34,6 +39,22 @@ export type Comment = {
   author: string;
   body: string;
   createdAt: string;
+};
+
+export type AssignedCard = {
+  cardId: string;
+  title: string;
+  boardId: string;
+  boardTitle: string;
+  columnTitle: string;
+  dueDate: string | null;
+  labels: Label[];
+};
+
+export type ChecklistItem = {
+  id: string;
+  text: string;
+  done: boolean;
 };
 
 export type ActivityEntry = {
@@ -62,15 +83,23 @@ export const emptyCardFields: CardFields = {
 
 // Optimistic local cards start with no comments; the server count arrives
 // with the next board load.
-export const newCardDefaults = { ...emptyCardFields, commentCount: 0 };
+export const newCardDefaults = {
+  ...emptyCardFields,
+  commentCount: 0,
+  checklistDone: 0,
+  checklistTotal: 0,
+};
 
 export class ApiError extends Error {
   status: number;
+  /** True when the server explained the failure, rather than only a status. */
+  hasDetail: boolean;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, hasDetail = false) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.hasDetail = hasDetail;
   }
 }
 
@@ -85,15 +114,17 @@ const request = async <T>(
 
   if (!response.ok) {
     let detail = `Request failed with status ${response.status}.`;
+    let hasDetail = false;
     try {
       const body = (await response.json()) as { detail?: string };
       if (body.detail) {
         detail = body.detail;
+        hasDetail = true;
       }
     } catch {
       // Use the status-based message when the response has no JSON body.
     }
-    throw new ApiError(detail, response.status);
+    throw new ApiError(detail, response.status, hasDetail);
   }
 
   return (await response.json()) as T;
@@ -125,10 +156,42 @@ export const api = {
 
   logout: () => request<{ authenticated: false }>("/api/auth/logout", { method: "POST" }),
 
-  listBoards: () => request<BoardSummary[]>("/api/boards"),
+  listBoards: (includeArchived = false) =>
+    request<BoardSummary[]>(
+      includeArchived ? "/api/boards?include_archived=true" : "/api/boards"
+    ),
 
-  createBoard: (title: string) =>
-    jsonRequest<BoardSummary>("/api/boards", { title }, "POST"),
+  createBoard: (title: string, template: BoardTemplate = "kanban") =>
+    jsonRequest<BoardSummary>("/api/boards", { title, template }, "POST"),
+
+  archiveBoard: (boardId: string, archived: boolean) =>
+    jsonRequest<{ archived: boolean }>(
+      `/api/boards/${encodeURIComponent(boardId)}/${
+        archived ? "archive" : "unarchive"
+      }`,
+      {},
+      "POST"
+    ),
+
+  createColumn: (boardId: string, title: string) =>
+    jsonRequest<Column>(
+      `/api/boards/${encodeURIComponent(boardId)}/columns`,
+      { title },
+      "POST"
+    ),
+
+  deleteColumn: (columnId: string) =>
+    request<{ deleted: true }>(
+      `/api/board/columns/${encodeURIComponent(columnId)}`,
+      { method: "DELETE" }
+    ),
+
+  moveColumn: (columnId: string, position: number) =>
+    jsonRequest<{ moved: true }>(
+      `/api/board/columns/${encodeURIComponent(columnId)}/move`,
+      { position },
+      "POST"
+    ),
 
   renameBoard: (boardId: string, title: string) =>
     jsonRequest<{ updated: true }>(
@@ -209,9 +272,36 @@ export const api = {
       { method: "DELETE" }
     ),
 
+  listMyTasks: () => request<AssignedCard[]>("/api/me/tasks"),
+
   listActivity: (boardId: string) =>
     request<ActivityEntry[]>(
       `/api/boards/${encodeURIComponent(boardId)}/activity`
+    ),
+
+  listChecklist: (cardId: string) =>
+    request<ChecklistItem[]>(
+      `/api/board/cards/${encodeURIComponent(cardId)}/checklist`
+    ),
+
+  addChecklistItem: (cardId: string, text: string) =>
+    jsonRequest<ChecklistItem>(
+      `/api/board/cards/${encodeURIComponent(cardId)}/checklist`,
+      { text },
+      "POST"
+    ),
+
+  setChecklistItemDone: (itemId: string, done: boolean) =>
+    jsonRequest<{ updated: true }>(
+      `/api/board/checklist/${encodeURIComponent(itemId)}`,
+      { done },
+      "PATCH"
+    ),
+
+  deleteChecklistItem: (itemId: string) =>
+    request<{ deleted: true }>(
+      `/api/board/checklist/${encodeURIComponent(itemId)}`,
+      { method: "DELETE" }
     ),
 
   listComments: (cardId: string) =>
@@ -268,10 +358,13 @@ export const api = {
     ),
 };
 
+// Prefer what the server said, but fall back to wording that fits the action
+// when all we have is a bare status code.
 export const getApiErrorMessage = (
   error: unknown,
   fallback: string
-): string => (error instanceof ApiError ? error.message : fallback);
+): string =>
+  error instanceof ApiError && error.hasDetail ? error.message : fallback;
 
 export const isSessionExpiredError = (error: unknown): boolean =>
   error instanceof ApiError && error.status === 401;

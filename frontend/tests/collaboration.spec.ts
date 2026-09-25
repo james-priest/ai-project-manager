@@ -75,16 +75,18 @@ test("shares a board, collaborates, and records activity", async ({ page }) => {
     .locator('[data-testid^="card-"]', { hasText: "Shared task" })
     .getAttribute("data-testid");
   const card = page.getByTestId(cardId ?? "");
-  await card.getByRole("button", { name: "Edit Shared task" }).click();
-  await card.getByLabel("New comment on Shared task").fill("On it");
+  await card.getByRole("button", { name: "Open Shared task" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("New comment on Shared task").fill("On it");
   const commented = page.waitForResponse(
     (response) =>
       response.url().includes("/comments") &&
       response.request().method() === "POST"
   );
-  await card.getByRole("button", { name: "Comment" }).click();
+  await dialog.getByRole("button", { name: "Comment" }).click();
   await commented;
-  await expect(card.getByText(/On it/)).toBeVisible();
+  await expect(dialog.getByText(/On it/)).toBeVisible();
+  await page.keyboard.press("Escape");
 
   // A guest cannot manage members.
   await page.getByRole("button", { name: "Sharing and activity" }).click();

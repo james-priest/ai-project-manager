@@ -22,6 +22,8 @@ export const testBoard: BoardData = {
       assignee: "Ada",
       labelIds: ["label-urgent"],
       commentCount: 0,
+      checklistDone: 0,
+      checklistTotal: 0,
     },
     "card-2": {
       id: "card-2",
@@ -31,6 +33,8 @@ export const testBoard: BoardData = {
       assignee: "",
       labelIds: [],
       commentCount: 0,
+      checklistDone: 0,
+      checklistTotal: 0,
     },
     "card-3": {
       id: "card-3",
@@ -40,6 +44,8 @@ export const testBoard: BoardData = {
       assignee: "",
       labelIds: [],
       commentCount: 0,
+      checklistDone: 0,
+      checklistTotal: 0,
     },
     "card-4": {
       id: "card-4",
@@ -49,6 +55,8 @@ export const testBoard: BoardData = {
       assignee: "",
       labelIds: [],
       commentCount: 0,
+      checklistDone: 0,
+      checklistTotal: 0,
     },
     "card-5": {
       id: "card-5",
@@ -58,6 +66,8 @@ export const testBoard: BoardData = {
       assignee: "",
       labelIds: [],
       commentCount: 0,
+      checklistDone: 0,
+      checklistTotal: 0,
     },
     "card-6": {
       id: "card-6",
@@ -67,6 +77,8 @@ export const testBoard: BoardData = {
       assignee: "",
       labelIds: [],
       commentCount: 0,
+      checklistDone: 0,
+      checklistTotal: 0,
     },
     "card-7": {
       id: "card-7",
@@ -76,6 +88,8 @@ export const testBoard: BoardData = {
       assignee: "",
       labelIds: [],
       commentCount: 0,
+      checklistDone: 0,
+      checklistTotal: 0,
     },
     "card-8": {
       id: "card-8",
@@ -85,6 +99,8 @@ export const testBoard: BoardData = {
       assignee: "",
       labelIds: [],
       commentCount: 0,
+      checklistDone: 0,
+      checklistTotal: 0,
     },
   },
   labels: {
@@ -101,6 +117,7 @@ export const testBoardSummaries: BoardSummary[] = [
     updatedAt: "2026-01-01T00:00:00+00:00",
     role: "owner",
     memberCount: 1,
+    archived: false,
   },
   {
     id: "board-2",
@@ -109,5 +126,6 @@ export const testBoardSummaries: BoardSummary[] = [
     updatedAt: "2026-01-02T00:00:00+00:00",
     role: "editor",
     memberCount: 2,
+    archived: false,
   },
 ];

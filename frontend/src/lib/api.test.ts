@@ -102,6 +102,7 @@ describe("api client", () => {
         name: "ApiError",
         message: "Card not found",
         status: 404,
+        hasDetail: true,
       })
     );
 
@@ -120,9 +121,16 @@ describe("api client", () => {
       })
     );
 
-    expect(getApiErrorMessage(new ApiError("Bad request", 400), "Fallback")).toBe(
-      "Bad request"
-    );
+    // A server-supplied detail wins; a bare status or a non-API error does not.
+    expect(
+      getApiErrorMessage(new ApiError("Bad request", 400, true), "Fallback")
+    ).toBe("Bad request");
+    expect(
+      getApiErrorMessage(
+        new ApiError("Request failed with status 500.", 500),
+        "Fallback"
+      )
+    ).toBe("Fallback");
     expect(getApiErrorMessage(new Error("offline"), "Fallback")).toBe("Fallback");
   });
 

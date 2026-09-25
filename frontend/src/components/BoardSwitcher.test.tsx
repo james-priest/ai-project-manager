@@ -11,6 +11,9 @@ const renderSwitcher = (overrides: Partial<Parameters<typeof BoardSwitcher>[0]> 
     onCreate: vi.fn().mockResolvedValue(undefined),
     onRename: vi.fn().mockResolvedValue(undefined),
     onDelete: vi.fn().mockResolvedValue(undefined),
+    onArchive: vi.fn().mockResolvedValue(undefined),
+    showArchived: false,
+    onShowArchivedChange: vi.fn(),
     ...overrides,
   };
   render(<BoardSwitcher {...props} />);
@@ -44,7 +47,7 @@ describe("BoardSwitcher", () => {
     await userEvent.type(screen.getByLabelText("New board name"), "  Hiring  ");
     await userEvent.click(screen.getByRole("button", { name: "Add board" }));
 
-    expect(onCreate).toHaveBeenCalledWith("Hiring");
+    expect(onCreate).toHaveBeenCalledWith("Hiring", "kanban");
     expect(screen.queryByLabelText("New board name")).not.toBeInTheDocument();
   });
 
@@ -124,5 +127,54 @@ describe("BoardSwitcher", () => {
     expect(
       screen.queryByRole("button", { name: "Delete Launch plan" })
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("BoardSwitcher templates and archiving", () => {
+  it("creates a board from a chosen template", async () => {
+    const { onCreate } = renderSwitcher();
+
+    await userEvent.click(screen.getByRole("button", { name: "New board" }));
+    await userEvent.type(screen.getByLabelText("New board name"), "Sprint 12");
+    await userEvent.selectOptions(
+      screen.getByLabelText("Board template"),
+      "sprint"
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Add board" }));
+
+    expect(onCreate).toHaveBeenCalledWith("Sprint 12", "sprint");
+  });
+
+  it("archives the active board", async () => {
+    const { onArchive } = renderSwitcher();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Archive Kanban Studio" })
+    );
+
+    expect(onArchive).toHaveBeenCalledWith("board-1", true);
+  });
+
+  it("offers to restore an archived board", async () => {
+    const archived = [
+      { ...testBoardSummaries[0], archived: true },
+      testBoardSummaries[1],
+    ];
+    const { onArchive } = renderSwitcher({ boards: archived });
+
+    expect(screen.getByText("archived")).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Restore Kanban Studio" })
+    );
+
+    expect(onArchive).toHaveBeenCalledWith("board-1", false);
+  });
+
+  it("toggles archived boards into the list", async () => {
+    const { onShowArchivedChange } = renderSwitcher();
+
+    await userEvent.click(screen.getByLabelText("Show archived"));
+
+    expect(onShowArchivedChange).toHaveBeenCalledWith(true);
   });
 });

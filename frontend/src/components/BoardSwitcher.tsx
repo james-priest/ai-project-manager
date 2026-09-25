@@ -2,15 +2,18 @@
 
 import { useState, type FormEvent } from "react";
 import clsx from "clsx";
-import type { BoardSummary } from "@/lib/api";
+import { BOARD_TEMPLATES, type BoardSummary, type BoardTemplate } from "@/lib/api";
 
 type BoardSwitcherProps = {
   boards: BoardSummary[];
   activeBoardId: string;
   onSelect: (boardId: string) => void;
-  onCreate: (title: string) => Promise<void>;
+  onCreate: (title: string, template: BoardTemplate) => Promise<void>;
   onRename: (boardId: string, title: string) => Promise<void>;
   onDelete: (boardId: string) => Promise<void>;
+  onArchive: (boardId: string, archived: boolean) => Promise<void>;
+  showArchived: boolean;
+  onShowArchivedChange: (showArchived: boolean) => void;
 };
 
 export const BoardSwitcher = ({
@@ -20,8 +23,12 @@ export const BoardSwitcher = ({
   onCreate,
   onRename,
   onDelete,
+  onArchive,
+  showArchived,
+  onShowArchivedChange,
 }: BoardSwitcherProps) => {
   const [newTitle, setNewTitle] = useState("");
+  const [newTemplate, setNewTemplate] = useState<BoardTemplate>("kanban");
   const [isCreating, setIsCreating] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [renamingBoardId, setRenamingBoardId] = useState<string | null>(null);
@@ -39,7 +46,7 @@ export const BoardSwitcher = ({
 
     setIsBusy(true);
     try {
-      await onCreate(title);
+      await onCreate(title, newTemplate);
       setNewTitle("");
       setIsCreating(false);
     } finally {
@@ -126,6 +133,11 @@ export const BoardSwitcher = ({
                   className="rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.15em] text-[var(--navy-dark)]"
                 >
                   {board.title}
+                  {board.archived && (
+                    <span className="ml-2 font-normal normal-case tracking-normal text-[var(--gray-text)]">
+                      archived
+                    </span>
+                  )}
                   <span className="ml-2 font-normal normal-case tracking-normal text-[var(--gray-text)]">
                     {board.cardCount}
                   </span>
@@ -144,6 +156,19 @@ export const BoardSwitcher = ({
                       className="rounded-full px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--gray-text)] transition hover:text-[var(--navy-dark)]"
                     >
                       Rename
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void onArchive(board.id, !board.archived)}
+                      aria-label={`${
+                        board.archived ? "Restore" : "Archive"
+                      } ${board.title}`}
+                      title={`${
+                        board.archived ? "Restore" : "Archive"
+                      } ${board.title}`}
+                      className="rounded-full px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--gray-text)] transition hover:text-[var(--navy-dark)]"
+                    >
+                      {board.archived ? "Restore" : "Archive"}
                     </button>
                     {boards.length > 1 &&
                       (confirmingDeleteId === board.id ? (
@@ -196,6 +221,21 @@ export const BoardSwitcher = ({
             required
             className="rounded-full border border-[var(--primary-blue)] bg-white px-4 py-2 text-xs font-semibold text-[var(--navy-dark)] outline-none"
           />
+          <select
+            value={newTemplate}
+            onChange={(event) =>
+              setNewTemplate(event.target.value as BoardTemplate)
+            }
+            aria-label="Board template"
+            disabled={isBusy}
+            className="rounded-full border border-[var(--stroke)] bg-white px-3 py-2 text-xs font-semibold text-[var(--navy-dark)] outline-none"
+          >
+            {BOARD_TEMPLATES.map((template) => (
+              <option key={template} value={template}>
+                {template}
+              </option>
+            ))}
+          </select>
           <button
             type="submit"
             disabled={isBusy}
@@ -213,6 +253,15 @@ export const BoardSwitcher = ({
           New board
         </button>
       )}
+
+      <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--gray-text)]">
+        <input
+          type="checkbox"
+          checked={showArchived}
+          onChange={(event) => onShowArchivedChange(event.target.checked)}
+        />
+        Show archived
+      </label>
     </nav>
   );
 };

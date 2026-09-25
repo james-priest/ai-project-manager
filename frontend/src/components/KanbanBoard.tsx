@@ -17,7 +17,10 @@ import {
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { BoardSwitcher } from "@/components/BoardSwitcher";
 import { BoardToolbar } from "@/components/BoardToolbar";
+import { CardDetailDialog } from "@/components/CardDetailDialog";
 import { CollaborationPanel } from "@/components/CollaborationPanel";
+import { MyWorkPanel } from "@/components/MyWorkPanel";
+import { NewColumnForm } from "@/components/NewColumnForm";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { AIChatSidebar } from "@/components/AIChatSidebar";
@@ -27,6 +30,7 @@ import {
   getApiErrorMessage,
   isSessionExpiredError,
   type BoardSummary,
+  type BoardTemplate,
   type CardFields,
 } from "@/lib/api";
 import {
@@ -34,9 +38,8 @@ import {
   emptyFilters,
   filterBoard,
   findCardColumn,
-  getCardDropPosition,
-  getKeyboardDropPosition,
   insertCard,
+  resolveCardDrop,
   moveCardToPosition,
   removeCard,
   setCard,
@@ -49,11 +52,17 @@ import {
 type KanbanBoardProps = {
   boardId: string;
   initialBoard: BoardData;
+  /** Set when arriving from "My work", so that card opens straight away. */
+  initialOpenCardId?: string | null;
+  onOpenTask?: (boardId: string, cardId: string) => void;
   boards?: BoardSummary[];
   onSelectBoard?: (boardId: string) => Promise<void>;
-  onCreateBoard?: (title: string) => Promise<void>;
+  onCreateBoard?: (title: string, template: BoardTemplate) => Promise<void>;
   onRenameBoard?: (boardId: string, title: string) => Promise<void>;
   onDeleteBoard?: (boardId: string) => Promise<void>;
+  onArchiveBoard?: (boardId: string, archived: boolean) => Promise<void>;
+  showArchivedBoards?: boolean;
+  onShowArchivedBoardsChange?: (showArchived: boolean) => void;
   onLogout?: () => Promise<void> | void;
   isLoggingOut?: boolean;
   onSessionExpired?: () => void;
@@ -66,11 +75,16 @@ const collisionDetection: CollisionDetection = (args) =>
 export const KanbanBoard = ({
   boardId,
   initialBoard,
+  initialOpenCardId = null,
+  onOpenTask,
   boards = [],
   onSelectBoard,
   onCreateBoard,
   onRenameBoard,
   onDeleteBoard,
+  onArchiveBoard,
+  showArchivedBoards = false,
+  onShowArchivedBoardsChange,
   onLogout,
   isLoggingOut = false,
   onSessionExpired,
@@ -79,6 +93,9 @@ export const KanbanBoard = ({
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [filters, setFilters] = useState<BoardFilters>(emptyFilters);
+  const [openCardId, setOpenCardId] = useState<string | null>(initialOpenCardId);
+  // Bumped whenever the board changes, so "My work" reloads with it.
+  const [boardVersion, setBoardVersion] = useState(0);
   // Compared against card due dates, so it only needs day precision.
   const [today] = useState(() => new Date().toISOString().slice(0, 10));
   const pendingMutations = useRef(new Set<Promise<unknown>>());
@@ -95,6 +112,7 @@ export const KanbanBoard = ({
 
   const trackMutation = <T,>(request: Promise<T>): Promise<T> => {
     mutationCount.current += 1;
+    noteBoardChanged();
     pendingMutations.current.add(request);
     const forget = () => {
       pendingMutations.current.delete(request);
@@ -102,6 +120,8 @@ export const KanbanBoard = ({
     request.then(forget, forget);
     return request;
   };
+
+  const noteBoardChanged = () => setBoardVersion((version) => version + 1);
 
   const handleMutationError = (error: unknown, fallback: string) => {
     if (isSessionExpiredError(error)) {
@@ -139,42 +159,21 @@ export const KanbanBoard = ({
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over, delta, activatorEvent } = event;
     setActiveCardId(null);
-
-    if (!over || active.id === over.id) {
+    if (!over) {
       return;
     }
 
-    const activeId = String(active.id);
-    const overId = String(over.id);
-    const activeColumn = findCardColumn(board.columns, activeId);
-    const targetColumn = findCardColumn(board.columns, overId);
-    if (!activeColumn || !targetColumn) {
-      return;
-    }
-
-    const isOverColumn = overId === targetColumn.id;
     const initialRect = active.rect.current.initial;
-    const position =
-      activatorEvent instanceof KeyboardEvent
-        ? getKeyboardDropPosition(
-            targetColumn.cardIds,
-            activeId,
-            overId,
-            isOverColumn
-          )
-        : getCardDropPosition(
-            targetColumn.cardIds,
-            activeId,
-            overId,
-            isOverColumn,
-            initialRect
-              ? { top: initialRect.top + delta.y, height: initialRect.height }
-              : (active.rect.current.translated ?? undefined),
-            over.rect
-          );
-
-    const originalPosition = activeColumn.cardIds.indexOf(activeId);
-    if (targetColumn.id === activeColumn.id && position === originalPosition) {
+    const drop = resolveCardDrop(board, {
+      activeId: String(active.id),
+      overId: String(over.id),
+      isKeyboardDrag: activatorEvent instanceof KeyboardEvent,
+      activeRect: initialRect
+        ? { top: initialRect.top + delta.y, height: initialRect.height }
+        : (active.rect.current.translated ?? undefined),
+      overRect: over.rect,
+    });
+    if (!drop) {
       return;
     }
 
@@ -183,26 +182,26 @@ export const KanbanBoard = ({
       ...prev,
       columns: moveCardToPosition(
         prev.columns,
-        activeId,
-        targetColumn.id,
-        position
+        drop.activeId,
+        drop.toColumnId,
+        drop.toPosition
       ),
     }));
 
-    void trackMutation(api.moveCard(activeId, targetColumn.id, position)).catch(
-      (error: unknown) => {
-        setBoard((prev) => ({
-          ...prev,
-          columns: moveCardToPosition(
-            prev.columns,
-            activeId,
-            activeColumn.id,
-            originalPosition
-          ),
-        }));
-        handleMutationError(error, "Unable to move card. Please try again.");
-      }
-    );
+    void trackMutation(
+      api.moveCard(drop.activeId, drop.toColumnId, drop.toPosition)
+    ).catch((error: unknown) => {
+      setBoard((prev) => ({
+        ...prev,
+        columns: moveCardToPosition(
+          prev.columns,
+          drop.activeId,
+          drop.fromColumnId,
+          drop.fromPosition
+        ),
+      }));
+      handleMutationError(error, "Unable to move card. Please try again.");
+    });
   };
 
   const handleRenameColumn = async (columnId: string, title: string) => {
@@ -292,6 +291,39 @@ export const KanbanBoard = ({
     }
   };
 
+  const handleAddColumn = async (title: string) => {
+    setMutationError(null);
+    try {
+      await trackMutation(api.createColumn(boardId, title));
+      await refreshBoard();
+    } catch (error) {
+      handleMutationError(error, "Unable to add that column. Please try again.");
+    }
+  };
+
+  const handleMoveColumn = async (columnId: string, position: number) => {
+    setMutationError(null);
+    try {
+      await trackMutation(api.moveColumn(columnId, position));
+      await refreshBoard();
+    } catch (error) {
+      handleMutationError(error, "Unable to move that column. Please try again.");
+    }
+  };
+
+  const handleDeleteColumn = async (columnId: string) => {
+    setMutationError(null);
+    try {
+      await trackMutation(api.deleteColumn(columnId));
+      await refreshBoard();
+    } catch (error) {
+      handleMutationError(
+        error,
+        "Unable to delete that column. Please try again."
+      );
+    }
+  };
+
   const handleCreateLabel = async (name: string, color: LabelColor) => {
     setMutationError(null);
     try {
@@ -322,7 +354,8 @@ export const KanbanBoard = ({
   const activeBoardRole =
     boards.find((summary) => summary.id === boardId)?.role ?? "owner";
   const boardLabels = Object.values(board.labels);
-  const visibleBoard = filterBoard(board, filters);
+  const openCard = openCardId ? board.cards[openCardId] : null;
+  const visibleBoard = filterBoard(board, filters, today);
   const activeCard = activeCardId ? board.cards[activeCardId] : null;
 
   return (
@@ -375,16 +408,24 @@ export const KanbanBoard = ({
               )}
             </div>
           </div>
-          {onSelectBoard && onCreateBoard && onRenameBoard && onDeleteBoard && (
-            <BoardSwitcher
-              boards={boards}
-              activeBoardId={boardId}
-              onSelect={(nextBoardId) => void onSelectBoard(nextBoardId)}
-              onCreate={onCreateBoard}
-              onRename={onRenameBoard}
-              onDelete={onDeleteBoard}
-            />
-          )}
+          {onSelectBoard &&
+            onCreateBoard &&
+            onRenameBoard &&
+            onDeleteBoard &&
+            onArchiveBoard &&
+            onShowArchivedBoardsChange && (
+              <BoardSwitcher
+                boards={boards}
+                activeBoardId={boardId}
+                onSelect={(nextBoardId) => void onSelectBoard(nextBoardId)}
+                onCreate={onCreateBoard}
+                onRename={onRenameBoard}
+                onDelete={onDeleteBoard}
+                onArchive={onArchiveBoard}
+                showArchived={showArchivedBoards}
+                onShowArchivedChange={onShowArchivedBoardsChange}
+              />
+            )}
           <div className="flex flex-wrap items-center gap-4">
             {board.columns.map((column) => (
               <div
@@ -397,6 +438,19 @@ export const KanbanBoard = ({
             ))}
           </div>
         </header>
+
+        <MyWorkPanel
+          today={today}
+          refreshKey={boardVersion}
+          onOpenTask={(taskBoardId, cardId) => {
+            if (taskBoardId === boardId) {
+              setOpenCardId(cardId);
+              return;
+            }
+            onOpenTask?.(taskBoardId, cardId);
+          }}
+          onError={setMutationError}
+        />
 
         <CollaborationPanel
           boardId={boardId}
@@ -421,21 +475,45 @@ export const KanbanBoard = ({
           onDragEnd={handleDragEnd}
         >
           <section className="grid gap-6 lg:grid-cols-5">
-            {visibleBoard.columns.map((column) => (
+            {visibleBoard.columns.map((column, index) => (
               <KanbanColumn
                 key={column.id}
                 column={column}
+                index={index}
+                columnCount={visibleBoard.columns.length}
+                onMoveColumn={handleMoveColumn}
+                onDeleteColumn={handleDeleteColumn}
                 cards={column.cardIds.map((cardId) => board.cards[cardId])}
                 labels={boardLabels}
                 today={today}
-                onCommentsChanged={() => void refreshBoard()}
                 onRename={handleRenameColumn}
                 onAddCard={handleAddCard}
-                onEditCard={handleEditCard}
+                onOpenCard={setOpenCardId}
                 onDeleteCard={handleDeleteCard}
               />
             ))}
+            <NewColumnForm onAdd={handleAddColumn} />
           </section>
+
+          {board.columns.length > 0 &&
+            countVisibleCards(visibleBoard) === 0 &&
+            Object.keys(board.cards).length > 0 && (
+              <p
+                role="status"
+                className="rounded-2xl border border-dashed border-[var(--stroke)] px-4 py-6 text-center text-sm text-[var(--gray-text)]"
+              >
+                No cards match these filters.
+              </p>
+            )}
+
+          {board.columns.length === 0 && (
+            <p
+              role="status"
+              className="rounded-2xl border border-dashed border-[var(--stroke)] px-4 py-6 text-center text-sm text-[var(--gray-text)]"
+            >
+              This board has no columns yet. Add one to start planning.
+            </p>
+          )}
           <DragOverlay>
             {activeCard ? (
               <div className="w-[260px]">
@@ -444,6 +522,25 @@ export const KanbanBoard = ({
             ) : null}
           </DragOverlay>
         </DndContext>
+        {openCard && (
+          <CardDetailDialog
+            card={openCard}
+            labels={boardLabels}
+            today={today}
+            boardId={boardId}
+            onSave={handleEditCard}
+            onDelete={async (cardId) => {
+              const column = findCardColumn(board.columns, cardId);
+              setOpenCardId(null);
+              if (column) {
+                await handleDeleteCard(column.id, cardId);
+              }
+            }}
+            onCommentsChanged={() => void refreshBoard()}
+            onClose={() => setOpenCardId(null)}
+          />
+        )}
+
         <AIChatSidebar
           boardId={boardId}
           onBoardChanged={() => void refreshBoard()}

@@ -1,11 +1,15 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import clsx from "clsx";
 import { CardLabel } from "@/components/CardLabel";
 import {
+  DUE_FILTERS,
+  emptyFilters,
+  hasActiveFilters,
   LABEL_COLORS,
   type BoardFilters,
+  type DueFilter,
   type Label,
   type LabelColor,
 } from "@/lib/kanban";
@@ -33,6 +37,26 @@ export const BoardToolbar = ({
   const [newLabelName, setNewLabelName] = useState("");
   const [newLabelColor, setNewLabelColor] = useState<LabelColor>("blue");
   const [isBusy, setIsBusy] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // "/" jumps to search, the way most board tools do; ignore it while the
+  // person is already typing somewhere.
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable;
+      if (event.key === "/" && !isTyping && !event.defaultPrevented) {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleShortcut);
+    return () => document.removeEventListener("keydown", handleShortcut);
+  }, []);
 
   const toggleLabelFilter = (labelId: string) => {
     onFiltersChange({
@@ -75,13 +99,20 @@ export const BoardToolbar = ({
     >
       <div className="flex flex-wrap items-center gap-3">
         <input
+          ref={searchRef}
           type="search"
           value={filters.query}
           onChange={(event) =>
             onFiltersChange({ ...filters, query: event.target.value })
           }
-          placeholder="Search cards"
+          placeholder="Search cards (press /)"
           aria-label="Search cards"
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && filters.query) {
+              event.preventDefault();
+              onFiltersChange({ ...filters, query: "" });
+            }
+          }}
           className="min-w-[220px] flex-1 rounded-full border border-[var(--stroke)] bg-white px-4 py-2 text-sm text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)]"
         />
 
@@ -105,6 +136,31 @@ export const BoardToolbar = ({
           );
         })}
 
+        <select
+          value={filters.due}
+          onChange={(event) =>
+            onFiltersChange({
+              ...filters,
+              due: event.target.value as DueFilter,
+            })
+          }
+          aria-label="Due date filter"
+          className="rounded-full border border-[var(--stroke)] bg-white px-3 py-2 text-xs font-semibold text-[var(--navy-dark)] outline-none"
+        >
+          {DUE_FILTERS.map((due) => (
+            <option key={due} value={due}>
+              {
+                {
+                  any: "Any due date",
+                  overdue: "Overdue",
+                  week: "Due in 7 days",
+                  none: "No due date",
+                }[due]
+              }
+            </option>
+          ))}
+        </select>
+
         <button
           type="button"
           onClick={() => setIsManagingLabels((current) => !current)}
@@ -114,16 +170,19 @@ export const BoardToolbar = ({
           Labels
         </button>
 
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
+        <p
+          aria-live="polite"
+          className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]"
+        >
           {visibleCount === totalCount
             ? `${totalCount} cards`
             : `${visibleCount} of ${totalCount} cards`}
         </p>
 
-        {(filters.query || filters.labelIds.length > 0) && (
+        {hasActiveFilters(filters) && (
           <button
             type="button"
-            onClick={() => onFiltersChange({ query: "", labelIds: [] })}
+            onClick={() => onFiltersChange(emptyFilters)}
             className="rounded-full px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--gray-text)] transition hover:text-[var(--navy-dark)]"
           >
             Clear filters

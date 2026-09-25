@@ -1,30 +1,41 @@
 import { expect, test, type Page } from "@playwright/test";
+import {
+  cardTestId,
+  columnTestId,
+  createCard,
+  registerWorkspace,
+  type Workspace,
+} from "./support/workspace";
 
-const signIn = async (page: Page) => {
-  await page.goto("/");
-  await page.getByLabel("Username").fill("user");
-  await page.getByLabel("Password").fill("password");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+/**
+ * Board journeys. Each test registers its own account and seeds only the cards
+ * it needs, so no test depends on another's leftovers.
+ */
 
-  // The session cookie set by login can lag slightly behind the UI update,
-  // so wait for it before issuing any page.request calls that need it.
-  await expect
-    .poll(async () =>
-      (await page.context().cookies()).some(
-        (cookie) => cookie.name === "session_id"
-      )
-    )
-    .toBe(true);
+type Board = Workspace & { cardIds: string[] };
+
+const setUpBoard = async (page: Page, titles: string[][]): Promise<Board> => {
+  const workspace = await registerWorkspace(page, "board");
+  const cardIds: string[] = [];
+  for (const [columnIndex, columnTitles] of titles.entries()) {
+    for (const title of columnTitles) {
+      cardIds.push(
+        await createCard(page, workspace.columnIds[columnIndex], title)
+      );
+    }
+  }
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "My board" })).toBeVisible();
+  return { ...workspace, cardIds };
 };
 
-const renameColumn = async (page: Page, title: string) => {
+const renameColumn = async (page: Page, columnId: string, title: string) => {
   const input = page
-    .getByTestId("column-col-backlog")
+    .getByTestId(columnTestId(columnId))
     .getByLabel("Column title");
   const responsePromise = page.waitForResponse(
     (response) =>
-      response.url().includes("/api/board/columns/col-backlog") &&
+      response.url().includes(`/api/board/columns/${columnId}`) &&
       response.request().method() === "PATCH"
   );
   await input.fill(title);
@@ -37,8 +48,8 @@ const dragCardToColumn = async (
   cardId: string,
   columnId: string
 ) => {
-  const card = page.getByTestId(`card-${cardId}`);
-  const targetColumn = page.getByTestId(`column-${columnId}`);
+  const card = page.getByTestId(cardTestId(cardId));
+  const targetColumn = page.getByTestId(columnTestId(columnId));
   // Boxes are viewport-relative, so make sure both ends are on screen before
   // measuring; the drop point is clamped to stay inside the column.
   await card.scrollIntoViewIfNeeded();
@@ -73,8 +84,8 @@ const dragCardAfterLastCard = async (
   cardId: string,
   columnId: string
 ) => {
-  const card = page.getByTestId(`card-${cardId}`);
-  const targetColumn = page.getByTestId(`column-${columnId}`);
+  const card = page.getByTestId(cardTestId(cardId));
+  const targetColumn = page.getByTestId(columnTestId(columnId));
   const lastCard = targetColumn.locator('[data-testid^="card-"]').last();
   await card.scrollIntoViewIfNeeded();
   await lastCard.scrollIntoViewIfNeeded();
@@ -103,14 +114,15 @@ const dragCardAfterLastCard = async (
 };
 
 test("loads the kanban board", async ({ page }) => {
-  await signIn(page);
+  await registerWorkspace(page, "board");
   await expect(page.locator('[data-testid^="column-"]')).toHaveCount(5);
 });
 
 test("adds a card to a column", async ({ page }) => {
-  await signIn(page);
-  const firstColumn = page.locator('[data-testid^="column-"]').first();
-  const title = `Playwright card ${Date.now()}`;
+  const { columnIds } = await setUpBoard(page, []);
+  const firstColumn = page.getByTestId(columnTestId(columnIds[0]));
+  const title = "Playwright card";
+
   await firstColumn.getByRole("button", { name: /add a card/i }).click();
   await firstColumn.getByPlaceholder("Card title").fill(title);
   await firstColumn.getByPlaceholder("Details").fill("Added via e2e.");
@@ -118,9 +130,9 @@ test("adds a card to a column", async ({ page }) => {
   await expect(firstColumn.getByText(title)).toBeVisible();
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
-  const reloadedColumn = page.getByTestId("column-col-backlog");
+  const reloadedColumn = page.getByTestId(columnTestId(columnIds[0]));
   await expect(reloadedColumn.getByText(title)).toBeVisible();
+
   const reloadedCard = reloadedColumn
     .getByText(title)
     .locator("xpath=ancestor::article");
@@ -138,183 +150,125 @@ test("adds a card to a column", async ({ page }) => {
 });
 
 test("persists a column rename after reload", async ({ page }) => {
-  await signIn(page);
-  await renameColumn(page, "Playwright Queue");
+  const { columnIds } = await setUpBoard(page, []);
+
+  await renameColumn(page, columnIds[0], "Playwright Queue");
   await page.reload();
+
   await expect(
-    page.getByTestId("column-col-backlog").getByLabel("Column title:")
+    page.getByTestId(columnTestId(columnIds[0])).getByLabel("Column title:")
   ).toHaveValue("Playwright Queue");
-  await renameColumn(page, "Backlog");
 });
 
 test("persists a card edit after reload", async ({ page }) => {
-  await signIn(page);
-  const card = page.getByTestId("card-card-1");
-  await card.getByRole("button", { name: "Edit Align roadmap themes" }).click();
-  await card
+  const { cardIds } = await setUpBoard(page, [["Align roadmap themes"]]);
+  const cardId = cardIds[0];
+  const card = page.getByTestId(cardTestId(cardId));
+
+  await card.getByRole("button", { name: "Open Align roadmap themes" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Edit card" }).click();
+  await dialog
     .getByLabel("Title for Align roadmap themes")
     .fill("Updated roadmap themes");
-  await card
+  await dialog
     .getByLabel("Details for Align roadmap themes")
     .fill("Updated through the browser.");
   const responsePromise = page.waitForResponse(
     (response) =>
-      response.url().endsWith("/api/board/cards/card-1") &&
+      response.url().endsWith(`/api/board/cards/${cardId}`) &&
       response.request().method() === "PATCH"
   );
-  await card.getByRole("button", { name: "Save" }).click();
+  await dialog.getByRole("button", { name: "Save" }).click();
   await responsePromise;
+  await page.keyboard.press("Escape");
   await expect(card.getByText("Updated roadmap themes")).toBeVisible();
 
   await page.reload();
-  const reloadedCard = page.getByTestId("card-card-1");
-  await expect(reloadedCard.getByText("Updated roadmap themes")).toBeVisible();
-  await reloadedCard.getByRole("button", { name: "Edit Updated roadmap themes" }).click();
-  await reloadedCard
-    .getByLabel("Title for Updated roadmap themes")
-    .fill("Align roadmap themes");
-  await reloadedCard
-    .getByLabel("Details for Updated roadmap themes")
-    .fill("Draft quarterly themes with impact statements and metrics.");
-  const restoreResponse = page.waitForResponse(
-    (response) =>
-      response.url().endsWith("/api/board/cards/card-1") &&
-      response.request().method() === "PATCH"
-  );
-  await reloadedCard.getByRole("button", { name: "Save" }).click();
-  await restoreResponse;
+  await expect(
+    page.getByTestId(cardTestId(cardId)).getByText("Updated roadmap themes")
+  ).toBeVisible();
+  await expect(
+    page
+      .getByTestId(cardTestId(cardId))
+      .getByText("Updated through the browser.")
+  ).toBeVisible();
 });
 
 test("moves a card between columns", async ({ page }) => {
-  await signIn(page);
+  const { columnIds, cardIds } = await setUpBoard(page, [["Roadmap themes"]]);
+  const reviewColumn = page.getByTestId(columnTestId(columnIds[3]));
 
-  // Start from a known position; a drag that does not change anything sends
-  // no request, so a leftover placement would hang this test.
-  const resetResponse = await page.request.post(
-    "/api/board/cards/card-1/move",
-    { data: { target_column_id: "col-backlog", position: 0 } }
-  );
-  expect(resetResponse.ok()).toBeTruthy();
-  await page.reload();
-  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+  await dragCardToColumn(page, cardIds[0], columnIds[3]);
+  await expect(reviewColumn.getByTestId(cardTestId(cardIds[0]))).toBeVisible();
 
-  const targetColumn = page.getByTestId("column-col-review");
-  await dragCardToColumn(page, "card-1", "col-review");
-  await expect(targetColumn.getByTestId("card-card-1")).toBeVisible();
   await page.reload();
   await expect(
-    page.getByTestId("column-col-review").getByTestId("card-card-1")
+    page
+      .getByTestId(columnTestId(columnIds[3]))
+      .getByTestId(cardTestId(cardIds[0]))
   ).toBeVisible();
-  await dragCardToColumn(page, "card-1", "col-backlog");
 });
 
 test("moves a card to the last position of another column", async ({ page }) => {
-  await signIn(page);
+  const { columnIds, cardIds } = await setUpBoard(page, [
+    ["Roadmap themes"],
+    [],
+    [],
+    ["Already in review"],
+  ]);
+  const targetColumn = page.getByTestId(columnTestId(columnIds[3]));
 
-  const resetResponse = await page.request.post(
-    "/api/board/cards/card-1/move",
-    { data: { target_column_id: "col-backlog", position: 0 } }
-  );
-  expect(resetResponse.ok()).toBeTruthy();
+  await dragCardAfterLastCard(page, cardIds[0], columnIds[3]);
+
+  await expect(
+    targetColumn.locator('[data-testid^="card-"]').last()
+  ).toHaveAttribute("data-testid", cardTestId(cardIds[0]));
+
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
-
-  try {
-    const targetColumn = page.getByTestId("column-col-review");
-    await dragCardAfterLastCard(page, "card-1", "col-review");
-
-    await expect(targetColumn.locator('[data-testid^="card-"]').last()).toHaveAttribute(
-      "data-testid",
-      "card-card-1"
-    );
-    await page.reload();
-    const reloadedTargetColumn = page.getByTestId("column-col-review");
-    await expect(
-      reloadedTargetColumn.locator('[data-testid^="card-"]').last()
-    ).toHaveAttribute("data-testid", "card-card-1");
-  } finally {
-    const cleanupResponse = await page.request.post(
-      "/api/board/cards/card-1/move",
-      { data: { target_column_id: "col-backlog", position: 0 } }
-    );
-    expect(cleanupResponse.ok()).toBeTruthy();
-  }
+  await expect(
+    page
+      .getByTestId(columnTestId(columnIds[3]))
+      .locator('[data-testid^="card-"]')
+      .last()
+  ).toHaveAttribute("data-testid", cardTestId(cardIds[0]));
 });
 
 test("moves a card into an empty column", async ({ page }) => {
-  await signIn(page);
+  const { columnIds, cardIds } = await setUpBoard(page, [["Roadmap themes"]]);
+  const targetColumn = page.getByTestId(columnTestId(columnIds[3]));
 
-  const emptyColumnResponse = await page.request.post(
-    "/api/board/cards/card-6/move",
-    { data: { target_column_id: "col-backlog", position: 0 } }
-  );
-  expect(emptyColumnResponse.ok()).toBeTruthy();
-  const resetCardResponse = await page.request.post(
-    "/api/board/cards/card-1/move",
-    { data: { target_column_id: "col-backlog", position: 0 } }
-  );
-  expect(resetCardResponse.ok()).toBeTruthy();
+  await expect(targetColumn.getByText("Drop a card here")).toBeVisible();
+  await dragCardToColumn(page, cardIds[0], columnIds[3]);
+  await expect(targetColumn.getByTestId(cardTestId(cardIds[0]))).toBeVisible();
+
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
-
-  try {
-    const targetColumn = page.getByTestId("column-col-review");
-    await expect(targetColumn.getByText("Drop a card here")).toBeVisible();
-    await dragCardToColumn(page, "card-1", "col-review");
-    await expect(targetColumn.getByTestId("card-card-1")).toBeVisible();
-    await page.reload();
-    await expect(
-      page.getByTestId("column-col-review").getByTestId("card-card-1")
-    ).toBeVisible();
-  } finally {
-    const restoreCardResponse = await page.request.post(
-      "/api/board/cards/card-1/move",
-      { data: { target_column_id: "col-backlog", position: 0 } }
-    );
-    expect(restoreCardResponse.ok()).toBeTruthy();
-    const restoreEmptyColumnResponse = await page.request.post(
-      "/api/board/cards/card-6/move",
-      { data: { target_column_id: "col-review", position: 0 } }
-    );
-    expect(restoreEmptyColumnResponse.ok()).toBeTruthy();
-  }
+  await expect(
+    page
+      .getByTestId(columnTestId(columnIds[3]))
+      .getByTestId(cardTestId(cardIds[0]))
+  ).toBeVisible();
 });
 
 test("moves cards with the keyboard", async ({ page }) => {
-  await signIn(page);
-
-  // Put the three cards this test steps through in known places.
-  const seedLayout = async () => {
-    // Each move inserts at position 0, so the last one ends up on top:
-    // backlog [card-1, card-2] and discovery [card-3, ...].
-    for (const [cardId, columnId] of [
-      ["card-3", "col-discovery"],
-      ["card-2", "col-backlog"],
-      ["card-1", "col-backlog"],
-    ] as const) {
-      const response = await page.request.post(
-        `/api/board/cards/${cardId}/move`,
-        { data: { target_column_id: columnId, position: 0 } }
-      );
-      expect(response.ok()).toBeTruthy();
-    }
-  };
-  await seedLayout();
-  await page.reload();
-  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+  const { columnIds, cardIds } = await setUpBoard(page, [
+    ["First card", "Second card"],
+    ["Discovery card"],
+  ]);
+  const [firstCardId] = cardIds;
 
   const moveWithKeyboard = async (key: "ArrowDown" | "ArrowRight") => {
     const responsePromise = page.waitForResponse(
       (response) =>
-        response.url().includes("/api/board/cards/card-1/move") &&
+        response.url().includes(`/api/board/cards/${firstCardId}/move`) &&
         response.request().method() === "POST"
     );
-    const card = page.getByTestId("card-card-1");
+    const card = page.getByTestId(cardTestId(firstCardId));
     await card.focus();
     await page.keyboard.press("Space");
     // Once the drag is live, dnd-kit announces the card as over itself.
     const liveRegion = page.getByRole("status");
-    const selfText = "was moved over droppable area card-1.";
+    const selfText = `was moved over droppable area ${firstCardId}.`;
     await expect(liveRegion).toContainText(selfText);
     // dnd-kit attaches its keydown listener on a timer after pickup, so an
     // early arrow press can be lost. Press again only while the card is still
@@ -328,23 +282,28 @@ test("moves cards with the keyboard", async ({ page }) => {
     await page.keyboard.press("Space");
     await responsePromise;
   };
+
   const backlogCards = page
-    .getByTestId("column-col-backlog")
+    .getByTestId(columnTestId(columnIds[0]))
     .locator('[data-testid^="card-"]');
 
-  try {
-    await moveWithKeyboard("ArrowDown");
-    await expect(backlogCards.last()).toHaveAttribute("data-testid", "card-card-1");
+  await moveWithKeyboard("ArrowDown");
+  await expect(backlogCards.last()).toHaveAttribute(
+    "data-testid",
+    cardTestId(firstCardId)
+  );
 
-    await moveWithKeyboard("ArrowRight");
-    await expect(
-      page.getByTestId("column-col-discovery").getByTestId("card-card-1")
-    ).toBeVisible();
-    await page.reload();
-    await expect(
-      page.getByTestId("column-col-discovery").getByTestId("card-card-1")
-    ).toBeVisible();
-  } finally {
-    await seedLayout();
-  }
+  await moveWithKeyboard("ArrowRight");
+  await expect(
+    page
+      .getByTestId(columnTestId(columnIds[1]))
+      .getByTestId(cardTestId(firstCardId))
+  ).toBeVisible();
+
+  await page.reload();
+  await expect(
+    page
+      .getByTestId(columnTestId(columnIds[1]))
+      .getByTestId(cardTestId(firstCardId))
+  ).toBeVisible();
 });

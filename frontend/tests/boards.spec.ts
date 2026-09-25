@@ -163,17 +163,20 @@ test("labels, due dates, assignees, and filtering", async ({ page }) => {
     .locator('[data-testid^="card-"]', { hasText: "Ship release" })
     .getAttribute("data-testid");
   const shipCard = page.getByTestId(shipCardId ?? "");
-  await shipCard.getByRole("button", { name: "Edit Ship release" }).click();
-  await shipCard.getByLabel("Due date for Ship release").fill(dueDate);
-  await shipCard.getByLabel("Assignee for Ship release").fill("Ada");
-  await shipCard.getByLabel("Urgent label for Ship release").check();
+  await shipCard.getByRole("button", { name: "Open Ship release" }).click();
+  const shipDialog = page.getByRole("dialog");
+  await shipDialog.getByRole("button", { name: "Edit card" }).click();
+  await shipDialog.getByLabel("Due date for Ship release").fill(dueDate);
+  await shipDialog.getByLabel("Assignee for Ship release").fill("Ada");
+  await shipDialog.getByLabel("Urgent label for Ship release").check();
   const saved = page.waitForResponse(
     (response) =>
       response.url().includes("/api/board/cards/") &&
       response.request().method() === "PATCH"
   );
-  await shipCard.getByRole("button", { name: "Save" }).click();
+  await shipDialog.getByRole("button", { name: "Save" }).click();
   await saved;
+  await page.keyboard.press("Escape");
 
   await expect(shipCard.getByText("Urgent")).toBeVisible();
   await expect(shipCard.getByText("Ada")).toBeVisible();
@@ -218,15 +221,253 @@ test("marks a past due date as overdue", async ({ page }) => {
     .locator('[data-testid^="card-"]', { hasText: "Late task" })
     .getAttribute("data-testid");
   const card = page.getByTestId(cardId ?? "");
-  await card.getByRole("button", { name: "Edit Late task" }).click();
-  await card.getByLabel("Due date for Late task").fill("2020-01-01");
+  await card.getByRole("button", { name: "Open Late task" }).click();
+  const lateDialog = page.getByRole("dialog");
+  await lateDialog.getByRole("button", { name: "Edit card" }).click();
+  await lateDialog.getByLabel("Due date for Late task").fill("2020-01-01");
   const saved = page.waitForResponse(
     (response) =>
       response.url().includes("/api/board/cards/") &&
       response.request().method() === "PATCH"
   );
-  await card.getByRole("button", { name: "Save" }).click();
+  await lateDialog.getByRole("button", { name: "Save" }).click();
   await saved;
+  await page.keyboard.press("Escape");
 
   await expect(card.getByText("Overdue 2020-01-01")).toBeVisible();
+});
+
+test("adds, reorders, and deletes columns", async ({ page }) => {
+  await registerAccount(page);
+  const columnTitles = () =>
+    page.getByTestId(/^column-/).evaluateAll((nodes) =>
+      nodes.map(
+        (node) =>
+          node.querySelector<HTMLInputElement>('input[aria-label^="Column title"]')
+            ?.value ?? ""
+      )
+    );
+
+  await expect.poll(columnTitles).toEqual([
+    "Backlog",
+    "Discovery",
+    "In Progress",
+    "Review",
+    "Done",
+  ]);
+
+  // Add a column at the end.
+  await page.getByRole("button", { name: "Add a column" }).click();
+  await page.getByLabel("New column name").fill("Blocked");
+  const added = page.waitForResponse(
+    (response) =>
+      response.url().includes("/columns") &&
+      response.request().method() === "POST"
+  );
+  await page.getByRole("button", { name: "Add column" }).click();
+  await added;
+  await expect.poll(columnTitles).toContain("Blocked");
+
+  // Move it to the front.
+  for (let step = 5; step > 0; step -= 1) {
+    const moved = page.waitForResponse(
+      (response) =>
+        response.url().includes("/move") &&
+        response.request().method() === "POST"
+    );
+    await page.getByRole("button", { name: "Move Blocked left" }).click();
+    await moved;
+  }
+  await expect.poll(columnTitles).toEqual([
+    "Blocked",
+    "Backlog",
+    "Discovery",
+    "In Progress",
+    "Review",
+    "Done",
+  ]);
+
+  // The order survives a reload, then delete the column.
+  await page.reload();
+  await expect.poll(columnTitles).toHaveLength(6);
+
+  await page.getByRole("button", { name: "Delete Blocked" }).click();
+  const deleted = page.waitForResponse(
+    (response) =>
+      response.url().includes("/columns/") &&
+      response.request().method() === "DELETE"
+  );
+  await page.getByRole("button", { name: "Confirm delete Blocked" }).click();
+  await deleted;
+
+  await expect.poll(columnTitles).not.toContain("Blocked");
+});
+
+test("creates a board from the sprint template", async ({ page }) => {
+  await registerAccount(page);
+
+  await page.getByRole("button", { name: "New board" }).click();
+  await page.getByLabel("New board name").fill("Sprint 12");
+  await page.getByLabel("Board template").selectOption("sprint");
+  await page.getByRole("button", { name: "Add board" }).click();
+
+  await expect(page.getByRole("heading", { name: "Sprint 12" })).toBeVisible();
+  await expect(
+    page.getByRole("textbox", { name: "Column title: Sprint backlog" })
+  ).toBeVisible();
+  await expect(page.getByTestId(/^column-/)).toHaveCount(4);
+});
+
+test("archives a board and restores it", async ({ page }) => {
+  await registerAccount(page);
+  await page.getByRole("button", { name: "New board" }).click();
+  await page.getByLabel("New board name").fill("Old work");
+  await page.getByRole("button", { name: "Add board" }).click();
+  await expect(page.getByRole("heading", { name: "Old work" })).toBeVisible();
+
+  const boards = page.getByRole("navigation", { name: "Boards" });
+  await page.getByRole("button", { name: "Archive Old work" }).click();
+
+  // The archived board drops out of the list and another opens.
+  await expect(boards.getByRole("button", { name: /^Old work/ })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "My board" })).toBeVisible();
+
+  await page.getByLabel("Show archived").check();
+  const archivedTab = boards.getByRole("button", { name: /^Old work/ });
+  await expect(archivedTab).toBeVisible();
+  await expect(archivedTab).toContainText("archived");
+
+  await boards.getByRole("button", { name: /^Old work/ }).click();
+  await page.getByRole("button", { name: "Restore Old work" }).click();
+  await expect(page.getByRole("heading", { name: "Old work" })).toBeVisible();
+
+  await page.getByLabel("Show archived").uncheck();
+  await expect(boards.getByRole("button", { name: /^Old work/ })).toBeVisible();
+});
+
+test("search shortcut and empty states", async ({ page }) => {
+  await registerAccount(page);
+
+  // A fresh board has columns but no cards, so no filter message yet.
+  await expect(page.getByText("No cards match these filters.")).toHaveCount(0);
+
+  const backlog = page.getByTestId(/^column-/).first();
+  await backlog.getByRole("button", { name: /add a card/i }).click();
+  await backlog.getByPlaceholder("Card title").fill("Findable");
+  const created = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/board/cards") &&
+      response.request().method() === "POST"
+  );
+  await backlog.getByRole("button", { name: /add card/i }).click();
+  await created;
+
+  // "/" focuses search from anywhere on the board.
+  await page.getByRole("heading", { name: "My board" }).click();
+  await page.keyboard.press("/");
+  await expect(page.getByLabel("Search cards")).toBeFocused();
+
+  await page.keyboard.type("nothing here");
+  await expect(page.getByText("No cards match these filters.")).toBeVisible();
+
+  // Escape clears the query from the search box.
+  await page.keyboard.press("Escape");
+  await expect(page.getByLabel("Search cards")).toHaveValue("");
+  await expect(page.getByText("Findable")).toBeVisible();
+});
+
+test("a blank board asks for its first column", async ({ page }) => {
+  await registerAccount(page);
+
+  await page.getByRole("button", { name: "New board" }).click();
+  await page.getByLabel("New board name").fill("From scratch");
+  await page.getByLabel("Board template").selectOption("blank");
+  await page.getByRole("button", { name: "Add board" }).click();
+
+  await expect(
+    page.getByText("This board has no columns yet. Add one to start planning.")
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Add a column" }).click();
+  await page.getByLabel("New column name").fill("Ideas");
+  const added = page.waitForResponse(
+    (response) =>
+      response.url().includes("/columns") &&
+      response.request().method() === "POST"
+  );
+  await page.getByRole("button", { name: "Add column" }).click();
+  await added;
+
+  await expect(
+    page.getByRole("textbox", { name: "Column title: Ideas" })
+  ).toBeVisible();
+  await expect(
+    page.getByText("This board has no columns yet. Add one to start planning.")
+  ).toHaveCount(0);
+});
+
+test("filters cards by due date", async ({ page }) => {
+  await registerAccount(page);
+
+  const past = "2020-01-01";
+  const soon = new Date();
+  soon.setDate(soon.getDate() + 3);
+  const soonDate = soon.toISOString().slice(0, 10);
+
+  const backlog = page.getByTestId(/^column-/).first();
+  const addCardWithDue = async (title: string, dueDate: string | null) => {
+    await backlog.getByRole("button", { name: /add a card/i }).click();
+    await backlog.getByPlaceholder("Card title").fill(title);
+    const created = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/board/cards") &&
+        response.request().method() === "POST"
+    );
+    await backlog.getByRole("button", { name: /add card/i }).click();
+    await created;
+
+    if (!dueDate) {
+      return;
+    }
+    const cardId = await page
+      .locator('[data-testid^="card-"]', { hasText: title })
+      .getAttribute("data-testid");
+    const card = page.getByTestId(cardId ?? "");
+    await card.getByRole("button", { name: `Open ${title}` }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Edit card" }).click();
+    await dialog.getByLabel(`Due date for ${title}`).fill(dueDate);
+    const saved = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/board/cards/") &&
+        response.request().method() === "PATCH"
+    );
+    await dialog.getByRole("button", { name: "Save" }).click();
+    await saved;
+    await page.keyboard.press("Escape");
+  };
+
+  await addCardWithDue("Late task", past);
+  await addCardWithDue("Soon task", soonDate);
+  await addCardWithDue("Someday task", null);
+
+  const dueFilter = page.getByLabel("Due date filter");
+
+  await dueFilter.selectOption("overdue");
+  await expect(page.getByText("Late task")).toBeVisible();
+  await expect(page.getByText("Soon task")).toHaveCount(0);
+  await expect(page.getByText("1 of 3 cards")).toBeVisible();
+
+  await dueFilter.selectOption("week");
+  await expect(page.getByText("Late task")).toBeVisible();
+  await expect(page.getByText("Soon task")).toBeVisible();
+  await expect(page.getByText("Someday task")).toHaveCount(0);
+
+  await dueFilter.selectOption("none");
+  await expect(page.getByText("Someday task")).toBeVisible();
+  await expect(page.getByText("Late task")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  // Columns carry their own "N cards" label, so read the toolbar's counter.
+  await expect(page.getByLabel("Board filters").getByText("3 cards")).toBeVisible();
 });

@@ -328,7 +328,7 @@ export const AIChatSidebar = ({
 
       <div className="px-5 pt-4">
         <p className="text-sm leading-6 text-[var(--gray-text)]">
-          Ask for a summary or request card changes in plain language.
+          Ask for a summary, or request changes in plain language: add and move cards, set due dates, assignees and labels, or clear a card out.
         </p>
       </div>
 
