@@ -13,4 +13,6 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.3,<9",
+    # Starlette's TestClient prefers httpx2; without it every test run warns.
+    "httpx2>=2,<3",
 ]
