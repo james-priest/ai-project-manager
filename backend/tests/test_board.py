@@ -72,6 +72,8 @@ def test_board_api_supports_authenticated_crud_and_ordering(
         "assignee": "",
         "labelIds": [],
         "commentCount": 0,
+        "checklistDone": 0,
+        "checklistTotal": 0,
     }
 
     delete_response = client.delete(f"/api/board/cards/{card_id}")

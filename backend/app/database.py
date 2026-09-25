@@ -8,10 +8,15 @@ from pathlib import Path
 
 from .config import get_database_path
 from .schemas import (
+    BOARD_TEMPLATES,
     ActivityEntry,
+    AddChecklistOperation,
+    AssignedCard,
+    DeleteCardOperation,
     BoardData,
     BoardMember,
     BoardSummary,
+    ChecklistItem,
     CommentData,
     LabelData,
     BoardOperation,
@@ -150,6 +155,7 @@ def initialize_database(database_path: Path | None = None) -> None:
                 user_id TEXT NOT NULL,
                 title TEXT NOT NULL,
                 position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0),
+                archived_at TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -189,6 +195,16 @@ def initialize_database(database_path: Path | None = None) -> None:
                 PRIMARY KEY (board_id, user_id),
                 FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS checklist_items (
+                id TEXT PRIMARY KEY,
+                card_id TEXT NOT NULL,
+                text TEXT NOT NULL,
+                done INTEGER NOT NULL DEFAULT 0 CHECK (done IN (0, 1)),
+                position INTEGER NOT NULL CHECK (position >= 0),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS card_comments (
@@ -263,6 +279,7 @@ def migrate_database(connection: sqlite3.Connection) -> None:
                 user_id TEXT NOT NULL,
                 title TEXT NOT NULL,
                 position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0),
+                archived_at TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -288,6 +305,8 @@ def migrate_database(connection: sqlite3.Connection) -> None:
         connection.execute(
             "ALTER TABLE boards ADD COLUMN position INTEGER NOT NULL DEFAULT 0"
         )
+    if "archived_at" not in columns:
+        connection.execute("ALTER TABLE boards ADD COLUMN archived_at TEXT")
 
     _migrate_card_columns(connection)
     _backfill_board_members(connection)
@@ -478,7 +497,11 @@ class SessionRepository:
 
 
 def _insert_board(
-    connection: sqlite3.Connection, user_id: str, title: str, position: int
+    connection: sqlite3.Connection,
+    user_id: str,
+    title: str,
+    position: int,
+    template: str = "kanban",
 ) -> str:
     board_id = f"board-{secrets.token_hex(8)}"
     connection.execute(
@@ -501,8 +524,8 @@ def _insert_board(
         VALUES (?, ?, ?, ?)
         """,
         [
-            (f"col-{secrets.token_hex(8)}", board_id, title, position)
-            for _, title, position in INITIAL_COLUMNS
+            (f"col-{secrets.token_hex(8)}", board_id, column_title, index)
+            for index, column_title in enumerate(BOARD_TEMPLATES[template])
         ],
     )
     return board_id
@@ -519,12 +542,15 @@ class BoardRepository:
     def initialize(self) -> None:
         initialize_database(self.database_path)
 
-    def list_boards(self, username: str) -> list[BoardSummary]:
+    def list_boards(
+        self, username: str, include_archived: bool = False
+    ) -> list[BoardSummary]:
         with closing(connect(self.database_path)) as connection, connection:
             rows = connection.execute(
                 """
                 SELECT boards.id, boards.title, boards.updated_at,
                        board_members.role AS role,
+                       boards.archived_at AS archived_at,
                        COUNT(DISTINCT cards.id) AS card_count,
                        (
                            SELECT COUNT(*)
@@ -537,10 +563,11 @@ class BoardRepository:
                 LEFT JOIN columns ON columns.board_id = boards.id
                 LEFT JOIN cards ON cards.column_id = columns.id
                 WHERE users.username = ?
+                  AND (boards.archived_at IS NULL OR ?)
                 GROUP BY boards.id
                 ORDER BY boards.position, boards.created_at
                 """,
-                (username,),
+                (username, include_archived),
             ).fetchall()
         return [
             BoardSummary(
@@ -550,11 +577,14 @@ class BoardRepository:
                 updatedAt=row["updated_at"],
                 role=row["role"],
                 memberCount=row["member_count"],
+                archived=row["archived_at"] is not None,
             )
             for row in rows
         ]
 
-    def create_board(self, username: str, title: str) -> BoardSummary | None:
+    def create_board(
+        self, username: str, title: str, template: str = "kanban"
+    ) -> BoardSummary | None:
         with closing(connect(self.database_path)) as connection, connection:
             user = connection.execute(
                 "SELECT id FROM users WHERE username = ?", (username,)
@@ -566,7 +596,9 @@ class BoardRepository:
                 "SELECT COALESCE(MAX(position), -1) + 1 FROM boards WHERE user_id = ?",
                 (user["id"],),
             ).fetchone()[0]
-            board_id = _insert_board(connection, user["id"], title, next_position)
+            board_id = _insert_board(
+                connection, user["id"], title, next_position, template
+            )
             return BoardSummary(
                 id=board_id, title=title, cardCount=0, updatedAt=utc_now()
             )
@@ -621,6 +653,127 @@ class BoardRepository:
             connection.execute("DELETE FROM boards WHERE id = ?", (board_id,))
             return True
 
+    def set_board_archived(
+        self, username: str, board_id: str, archived: bool
+    ) -> bool:
+        with closing(connect(self.database_path)) as connection, connection:
+            if self._board_role(connection, username, board_id) != "owner":
+                return False
+
+            connection.execute(
+                "UPDATE boards SET archived_at = ?, updated_at = ? WHERE id = ?",
+                (utc_now() if archived else None, utc_now(), board_id),
+            )
+            self._record_activity(
+                connection,
+                board_id,
+                username,
+                "archived the board" if archived else "restored the board",
+            )
+            return True
+
+    def create_column(
+        self, username: str, board_id: str, title: str
+    ) -> ColumnData | None:
+        with closing(connect(self.database_path)) as connection, connection:
+            if self._get_board(connection, username, board_id) is None:
+                return None
+
+            next_position = connection.execute(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM columns WHERE board_id = ?",
+                (board_id,),
+            ).fetchone()[0]
+            column_id = f"col-{secrets.token_hex(8)}"
+            connection.execute(
+                """
+                INSERT INTO columns (id, board_id, title, position)
+                VALUES (?, ?, ?, ?)
+                """,
+                (column_id, board_id, title, next_position),
+            )
+            self._record_activity(
+                connection, board_id, username, f'added the column "{title}"'
+            )
+            self._touch_board(connection, board_id)
+            return ColumnData(id=column_id, title=title, cardIds=[])
+
+    def delete_column(self, username: str, column_id: str) -> bool:
+        with closing(connect(self.database_path)) as connection, connection:
+            board_id = self._column_board_id(connection, username, column_id)
+            if board_id is None:
+                return False
+
+            remaining = connection.execute(
+                "SELECT id, title FROM columns WHERE board_id = ? ORDER BY position",
+                (board_id,),
+            ).fetchall()
+            # A board always keeps one column so cards have somewhere to live.
+            if len(remaining) <= 1:
+                raise BoardOperationError(
+                    "A board needs at least one column."
+                )
+
+            title = next(
+                row["title"] for row in remaining if row["id"] == column_id
+            )
+            connection.execute("DELETE FROM columns WHERE id = ?", (column_id,))
+            self._set_column_order(
+                connection,
+                [row["id"] for row in remaining if row["id"] != column_id],
+            )
+            self._record_activity(
+                connection, board_id, username, f'deleted the column "{title}"'
+            )
+            self._touch_board(connection, board_id)
+            return True
+
+    def move_column(self, username: str, column_id: str, position: int) -> bool:
+        with closing(connect(self.database_path)) as connection, connection:
+            board_id = self._column_board_id(connection, username, column_id)
+            if board_id is None:
+                return False
+
+            column_ids = [
+                row["id"]
+                for row in connection.execute(
+                    "SELECT id FROM columns WHERE board_id = ? ORDER BY position",
+                    (board_id,),
+                ).fetchall()
+            ]
+            if position >= len(column_ids):
+                raise BoardOperationError("Invalid column position")
+
+            column_ids.remove(column_id)
+            column_ids.insert(position, column_id)
+            self._set_column_order(connection, column_ids)
+            title = connection.execute(
+                "SELECT title FROM columns WHERE id = ?", (column_id,)
+            ).fetchone()["title"]
+            self._record_activity(
+                connection, board_id, username, f'reordered the column "{title}"'
+            )
+            self._touch_board(connection, board_id)
+            return True
+
+    @staticmethod
+    def _set_column_order(
+        connection: sqlite3.Connection, column_ids: list[str]
+    ) -> None:
+        # Park the columns first so UNIQUE(board_id, position) never collides.
+        offset = connection.execute(
+            "SELECT COALESCE(MAX(position), 0) + 1000 FROM columns"
+        ).fetchone()[0]
+        for column_id in column_ids:
+            connection.execute(
+                "UPDATE columns SET position = position + ? WHERE id = ?",
+                (offset, column_id),
+            )
+        for position, column_id in enumerate(column_ids):
+            connection.execute(
+                "UPDATE columns SET position = ?, updated_at = ? WHERE id = ?",
+                (position, utc_now(), column_id),
+            )
+
     def get_board_by_id(self, username: str, board_id: str) -> BoardData | None:
         with closing(connect(self.database_path)) as connection, connection:
             board = connection.execute(
@@ -666,6 +819,19 @@ class BoardRepository:
             }
             cards = dict(current_board.cards)
             created_card_ids: list[str] = []
+            deleted_card_ids: list[str] = []
+            checklist_additions: list[tuple[str, list[str]]] = []
+            known_label_ids = set(current_board.labels)
+
+            def checked_label_ids(label_ids: list[str]) -> list[str]:
+                unknown = [
+                    label_id
+                    for label_id in label_ids
+                    if label_id not in known_label_ids
+                ]
+                if unknown:
+                    raise BoardOperationError("Unknown label for this board")
+                return list(dict.fromkeys(label_ids))
 
             for operation in operations:
                 if isinstance(operation, CreateCardOperation):
@@ -681,6 +847,9 @@ class BoardRepository:
                         id=card_id,
                         title=operation.title,
                         details=operation.details,
+                        dueDate=operation.due_date,
+                        assignee=operation.assignee,
+                        labelIds=checked_label_ids(operation.label_ids),
                     )
                     created_card_ids.append(card_id)
                     continue
@@ -689,11 +858,49 @@ class BoardRepository:
                     if operation.card_id not in cards:
                         raise BoardOperationError("Card not found")
                     existing_card = cards[operation.card_id]
+                    provided = operation.model_fields_set
                     cards[operation.card_id] = CardData(
                         id=existing_card.id,
                         title=operation.title,
                         details=operation.details,
+                        dueDate=(
+                            operation.due_date
+                            if "due_date" in provided
+                            else existing_card.dueDate
+                        ),
+                        assignee=(
+                            operation.assignee or ""
+                            if "assignee" in provided
+                            else existing_card.assignee
+                        ),
+                        labelIds=(
+                            checked_label_ids(operation.label_ids or [])
+                            if "label_ids" in provided
+                            else existing_card.labelIds
+                        ),
+                        commentCount=existing_card.commentCount,
                     )
+                    continue
+
+                if isinstance(operation, AddChecklistOperation):
+                    if operation.card_id not in cards:
+                        raise BoardOperationError("Card not found")
+                    checklist_additions.append(
+                        (operation.card_id, operation.steps)
+                    )
+                    continue
+
+                if isinstance(operation, DeleteCardOperation):
+                    if operation.card_id not in cards:
+                        raise BoardOperationError("Card not found")
+                    for card_ids in column_card_ids.values():
+                        if operation.card_id in card_ids:
+                            card_ids.remove(operation.card_id)
+                    cards.pop(operation.card_id)
+                    if operation.card_id in created_card_ids:
+                        created_card_ids.remove(operation.card_id)
+                    else:
+                        deleted_card_ids.append(operation.card_id)
                     continue
 
                 if isinstance(operation, MoveCardOperation):
@@ -728,7 +935,16 @@ class BoardRepository:
                 column_card_ids,
                 cards,
                 created_card_ids,
+                deleted_card_ids,
             )
+
+            for card_id, steps in checklist_additions:
+                self._append_checklist_items(connection, card_id, steps)
+
+            for summary in self._assistant_activity(
+                current_board, cards, created_card_ids, deleted_card_ids, operations
+            ):
+                self._record_activity(connection, board["id"], username, summary)
 
         updated_board = (
             self.get_board_by_id(username, board_id)
@@ -786,6 +1002,22 @@ class BoardRepository:
                 (board["id"],),
             ).fetchall()
         }
+        checklist_progress = {
+            row["card_id"]: (row["done"], row["total"])
+            for row in connection.execute(
+                """
+                SELECT checklist_items.card_id,
+                       SUM(checklist_items.done) AS done,
+                       COUNT(*) AS total
+                FROM checklist_items
+                JOIN cards ON cards.id = checklist_items.card_id
+                JOIN columns ON columns.id = cards.column_id
+                WHERE columns.board_id = ?
+                GROUP BY checklist_items.card_id
+                """,
+                (board["id"],),
+            ).fetchall()
+        }
         card_label_rows = connection.execute(
             """
             SELECT card_labels.card_id, card_labels.label_id
@@ -813,6 +1045,8 @@ class BoardRepository:
                 assignee=card["assignee"],
                 labelIds=label_ids_by_card.get(card["id"], []),
                 commentCount=comment_counts.get(card["id"], 0),
+                checklistDone=checklist_progress.get(card["id"], (0, 0))[0],
+                checklistTotal=checklist_progress.get(card["id"], (0, 0))[1],
             )
 
         return BoardData(
@@ -841,7 +1075,11 @@ class BoardRepository:
         column_card_ids: dict[str, list[str]],
         cards: dict[str, CardData],
         created_card_ids: list[str],
+        deleted_card_ids: list[str] | None = None,
     ) -> None:
+        for card_id in deleted_card_ids or []:
+            connection.execute("DELETE FROM cards WHERE id = ?", (card_id,))
+
         current_placement = {
             card_id: (column.id, position)
             for column in current_board.columns
@@ -868,10 +1106,23 @@ class BoardRepository:
             if card_id in created_card_ids:
                 connection.execute(
                     """
-                    INSERT INTO cards (id, column_id, title, details, position)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO cards
+                        (id, column_id, title, details, due_date, assignee,
+                         position)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (card.id, column_id, card.title, card.details, position),
+                    (
+                        card.id,
+                        column_id,
+                        card.title,
+                        card.details,
+                        card.dueDate,
+                        card.assignee,
+                        position,
+                    ),
+                )
+                BoardRepository._set_card_labels(
+                    connection, card.id, card.labelIds
                 )
                 continue
 
@@ -885,19 +1136,25 @@ class BoardRepository:
             connection.execute(
                 """
                 UPDATE cards
-                SET column_id = ?, title = ?, details = ?, position = ?,
-                    updated_at = ?
+                SET column_id = ?, title = ?, details = ?, due_date = ?,
+                    assignee = ?, position = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
                     column_id,
                     card.title,
                     card.details,
+                    card.dueDate,
+                    card.assignee,
                     position,
                     utc_now(),
                     card_id,
                 ),
             )
+            if card.labelIds != current_board.cards[card_id].labelIds:
+                BoardRepository._set_card_labels(
+                    connection, card_id, card.labelIds
+                )
 
         BoardRepository._touch_board(connection, board_id)
 
@@ -1126,6 +1383,131 @@ class BoardRepository:
                 )
             return result.rowcount == 1
 
+    def list_checklist(
+        self, username: str, card_id: str
+    ) -> list[ChecklistItem] | None:
+        with closing(connect(self.database_path)) as connection, connection:
+            if self._card_board_id(connection, username, card_id) is None:
+                return None
+            return self._checklist_items(connection, card_id)
+
+    def add_checklist_item(
+        self, username: str, card_id: str, text: str
+    ) -> ChecklistItem | None:
+        with closing(connect(self.database_path)) as connection, connection:
+            if self._card_board_id(connection, username, card_id) is None:
+                return None
+
+            next_position = connection.execute(
+                """
+                SELECT COALESCE(MAX(position), -1) + 1
+                FROM checklist_items
+                WHERE card_id = ?
+                """,
+                (card_id,),
+            ).fetchone()[0]
+            item_id = f"check-{secrets.token_hex(8)}"
+            connection.execute(
+                """
+                INSERT INTO checklist_items
+                    (id, card_id, text, done, position, created_at)
+                VALUES (?, ?, ?, 0, ?, ?)
+                """,
+                (item_id, card_id, text, next_position, utc_now()),
+            )
+            return ChecklistItem(id=item_id, text=text, done=False)
+
+    def set_checklist_item_done(
+        self, username: str, item_id: str, done: bool
+    ) -> bool:
+        with closing(connect(self.database_path)) as connection, connection:
+            if self._checklist_item_card_id(connection, username, item_id) is None:
+                return False
+
+            connection.execute(
+                "UPDATE checklist_items SET done = ? WHERE id = ?",
+                (1 if done else 0, item_id),
+            )
+            return True
+
+    def delete_checklist_item(self, username: str, item_id: str) -> bool:
+        with closing(connect(self.database_path)) as connection, connection:
+            if self._checklist_item_card_id(connection, username, item_id) is None:
+                return False
+
+            connection.execute(
+                "DELETE FROM checklist_items WHERE id = ?", (item_id,)
+            )
+            return True
+
+    @staticmethod
+    def _append_checklist_items(
+        connection: sqlite3.Connection, card_id: str, steps: list[str]
+    ) -> None:
+        next_position = connection.execute(
+            """
+            SELECT COALESCE(MAX(position), -1) + 1
+            FROM checklist_items
+            WHERE card_id = ?
+            """,
+            (card_id,),
+        ).fetchone()[0]
+        connection.executemany(
+            """
+            INSERT INTO checklist_items
+                (id, card_id, text, done, position, created_at)
+            VALUES (?, ?, ?, 0, ?, ?)
+            """,
+            [
+                (
+                    f"check-{secrets.token_hex(8)}",
+                    card_id,
+                    step,
+                    next_position + offset,
+                    utc_now(),
+                )
+                for offset, step in enumerate(steps)
+            ],
+        )
+
+    @staticmethod
+    def _checklist_items(
+        connection: sqlite3.Connection, card_id: str
+    ) -> list[ChecklistItem]:
+        return [
+            ChecklistItem(
+                id=row["id"], text=row["text"], done=bool(row["done"])
+            )
+            for row in connection.execute(
+                """
+                SELECT id, text, done
+                FROM checklist_items
+                WHERE card_id = ?
+                ORDER BY position
+                """,
+                (card_id,),
+            ).fetchall()
+        ]
+
+    @staticmethod
+    def _checklist_item_card_id(
+        connection: sqlite3.Connection, username: str, item_id: str
+    ) -> str | None:
+        row = connection.execute(
+            """
+            SELECT checklist_items.card_id
+            FROM checklist_items
+            JOIN cards ON cards.id = checklist_items.card_id
+            JOIN columns ON columns.id = cards.column_id
+            JOIN boards ON boards.id = columns.board_id
+            JOIN board_members ON board_members.board_id = boards.id
+            JOIN users ON users.id = board_members.user_id
+            WHERE checklist_items.id = ? AND users.username = ?
+            """,
+            (item_id, username),
+        ).fetchone()
+        return row["card_id"] if row else None
+
     def list_comments(self, username: str, card_id: str) -> list[CommentData] | None:
         with closing(connect(self.database_path)) as connection, connection:
             if self._card_board_id(connection, username, card_id) is None:
@@ -1195,6 +1577,61 @@ class BoardRepository:
             )
             return result.rowcount == 1
 
+    def list_assigned_cards(self, username: str) -> list[AssignedCard]:
+        """Cards assigned to this user across every board they belong to.
+
+        Due cards come first, oldest date first; undated cards follow.
+        """
+        with closing(connect(self.database_path)) as connection, connection:
+            rows = connection.execute(
+                """
+                SELECT cards.id AS card_id, cards.title, cards.due_date,
+                       columns.title AS column_title,
+                       boards.id AS board_id, boards.title AS board_title
+                FROM cards
+                JOIN columns ON columns.id = cards.column_id
+                JOIN boards ON boards.id = columns.board_id
+                JOIN board_members ON board_members.board_id = boards.id
+                JOIN users ON users.id = board_members.user_id
+                WHERE users.username = ?
+                  AND boards.archived_at IS NULL
+                  AND LOWER(cards.assignee) = LOWER(?)
+                ORDER BY
+                    CASE WHEN cards.due_date IS NULL THEN 1 ELSE 0 END,
+                    cards.due_date,
+                    boards.position,
+                    columns.position,
+                    cards.position
+                """,
+                (username, username),
+            ).fetchall()
+
+            labels_by_card: dict[str, list[LabelData]] = {}
+            for row in connection.execute(
+                """
+                SELECT card_labels.card_id, labels.id, labels.name, labels.color
+                FROM card_labels
+                JOIN labels ON labels.id = card_labels.label_id
+                ORDER BY labels.name
+                """
+            ).fetchall():
+                labels_by_card.setdefault(row["card_id"], []).append(
+                    LabelData(id=row["id"], name=row["name"], color=row["color"])
+                )
+
+        return [
+            AssignedCard(
+                cardId=row["card_id"],
+                title=row["title"],
+                boardId=row["board_id"],
+                boardTitle=row["board_title"],
+                columnTitle=row["column_title"],
+                dueDate=row["due_date"],
+                labels=labels_by_card.get(row["card_id"], []),
+            )
+            for row in rows
+        ]
+
     def list_activity(
         self, username: str, board_id: str, limit: int = 50
     ) -> list[ActivityEntry] | None:
@@ -1223,6 +1660,55 @@ class BoardRepository:
             )
             for row in rows
         ]
+
+    @staticmethod
+    def _assistant_activity(
+        current_board: BoardData,
+        cards: dict[str, CardData],
+        created_card_ids: list[str],
+        deleted_card_ids: list[str],
+        operations: list[BoardOperation],
+    ) -> list[str]:
+        """One activity line per operation the assistant applied."""
+        summaries: list[str] = []
+        for operation in operations:
+            if isinstance(operation, CreateCardOperation):
+                summaries.append(
+                    f'added "{operation.title}" with the assistant'
+                )
+            elif isinstance(operation, EditCardOperation):
+                summaries.append(
+                    f'updated "{operation.title}" with the assistant'
+                )
+            elif isinstance(operation, AddChecklistOperation):
+                card = cards.get(operation.card_id) or current_board.cards.get(
+                    operation.card_id
+                )
+                if card is not None:
+                    summaries.append(
+                        f'added {len(operation.steps)} checklist steps to '
+                        f'"{card.title}" with the assistant'
+                    )
+            elif isinstance(operation, DeleteCardOperation):
+                title = current_board.cards[operation.card_id].title
+                summaries.append(f'deleted "{title}" with the assistant')
+            elif isinstance(operation, MoveCardOperation):
+                card = cards.get(operation.card_id) or current_board.cards.get(
+                    operation.card_id
+                )
+                column = next(
+                    (
+                        column.title
+                        for column in current_board.columns
+                        if column.id == operation.target_column_id
+                    ),
+                    "another column",
+                )
+                if card is not None:
+                    summaries.append(
+                        f'moved "{card.title}" to {column} with the assistant'
+                    )
+        return summaries
 
     @staticmethod
     def _board_role(

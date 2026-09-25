@@ -12,6 +12,28 @@ class LabelData(BaseModel):
     color: str
 
 
+class ChecklistItem(BaseModel):
+    id: str
+    text: str
+    done: bool
+
+
+class CreateChecklistItemRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+
+    @field_validator("text")
+    @classmethod
+    def clean_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("text must not be blank")
+        return value
+
+
+class UpdateChecklistItemRequest(BaseModel):
+    done: bool
+
+
 class CardData(BaseModel):
     id: str
     title: str
@@ -20,6 +42,8 @@ class CardData(BaseModel):
     assignee: str = ""
     labelIds: list[str] = Field(default_factory=list)
     commentCount: int = 0
+    checklistDone: int = 0
+    checklistTotal: int = 0
 
 
 class ColumnData(BaseModel):
@@ -78,6 +102,23 @@ class BoardSummary(BaseModel):
     updatedAt: str
     role: str = "owner"
     memberCount: int = 1
+    archived: bool = False
+
+
+class CreateColumnRequest(BaseModel):
+    title: str = Field(max_length=MAX_TEXT_LENGTH)
+
+    @field_validator("title")
+    @classmethod
+    def title_must_not_be_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("title must not be blank")
+        return value
+
+
+class MoveColumnRequest(BaseModel):
+    position: int = Field(ge=0)
 
 
 class BoardMember(BaseModel):
@@ -113,6 +154,18 @@ class CreateCommentRequest(BaseModel):
         return value
 
 
+class AssignedCard(BaseModel):
+    """A card assigned to the signed-in user, from any board they can see."""
+
+    cardId: str
+    title: str
+    boardId: str
+    boardTitle: str
+    columnTitle: str
+    dueDate: str | None
+    labels: list[LabelData] = Field(default_factory=list)
+
+
 class ActivityEntry(BaseModel):
     id: str
     actor: str
@@ -120,8 +173,24 @@ class ActivityEntry(BaseModel):
     createdAt: str
 
 
+BOARD_TEMPLATES: dict[str, list[str]] = {
+    "kanban": ["Backlog", "Discovery", "In Progress", "Review", "Done"],
+    "sprint": ["Sprint backlog", "In progress", "In review", "Done"],
+    "blank": [],
+}
+
+
 class CreateBoardRequest(BaseModel):
     title: str = Field(max_length=MAX_TEXT_LENGTH)
+    template: str = "kanban"
+
+    @field_validator("template")
+    @classmethod
+    def known_template(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in BOARD_TEMPLATES:
+            raise ValueError(f"template must be one of {sorted(BOARD_TEMPLATES)}")
+        return value
 
     @field_validator("title")
     @classmethod
@@ -169,6 +238,9 @@ class CreateCardOperation(BaseModel):
     position: int = Field(ge=0)
     title: str = Field(max_length=MAX_TEXT_LENGTH)
     details: str = Field(default="", max_length=MAX_TEXT_LENGTH)
+    due_date: str | None = Field(default=None, pattern=ISO_DATE)
+    assignee: str = Field(default="", max_length=100)
+    label_ids: list[str] = Field(default_factory=list, max_length=20)
 
     @field_validator("column_id")
     @classmethod
@@ -193,10 +265,19 @@ class CreateCardOperation(BaseModel):
 
 
 class EditCardOperation(BaseModel):
+    """Fields left out of an edit keep their current value.
+
+    `model_fields_set` is what tells an omitted field from an explicit null,
+    so the model can clear a due date by sending `"due_date": null`.
+    """
+
     operation: Literal["edit_card"]
     card_id: str = Field(min_length=1)
     title: str = Field(max_length=MAX_TEXT_LENGTH)
     details: str = Field(default="", max_length=MAX_TEXT_LENGTH)
+    due_date: str | None = Field(default=None, pattern=ISO_DATE)
+    assignee: str | None = Field(default=None, max_length=100)
+    label_ids: list[str] | None = Field(default=None, max_length=20)
 
     @field_validator("card_id")
     @classmethod
@@ -235,8 +316,45 @@ class MoveCardOperation(BaseModel):
         return value
 
 
+class AddChecklistOperation(BaseModel):
+    """Adds steps to a card's checklist; existing steps are kept."""
+
+    operation: Literal["add_checklist"]
+    card_id: str = Field(min_length=1)
+    steps: list[str] = Field(min_length=1, max_length=20)
+
+    @field_validator("steps")
+    @classmethod
+    def clean_steps(cls, value: list[str]) -> list[str]:
+        steps = [step.strip() for step in value if step.strip()]
+        if not steps:
+            raise ValueError("steps must not be blank")
+        if any(len(step) > MAX_TEXT_LENGTH for step in steps):
+            raise ValueError("a step is too long")
+        return steps
+
+
+class DeleteCardOperation(BaseModel):
+    operation: Literal["delete_card"]
+    card_id: str = Field(min_length=1)
+
+    @field_validator("card_id")
+    @classmethod
+    def card_id_must_not_be_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("card_id must not be blank")
+        return value
+
+
 BoardOperation = Annotated[
-    Union[CreateCardOperation, EditCardOperation, MoveCardOperation],
+    Union[
+        CreateCardOperation,
+        EditCardOperation,
+        MoveCardOperation,
+        DeleteCardOperation,
+        AddChecklistOperation,
+    ],
     Field(discriminator="operation"),
 ]
 

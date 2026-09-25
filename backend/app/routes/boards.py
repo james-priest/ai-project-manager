@@ -5,10 +5,13 @@ from ..dependencies import get_board_repository, get_current_user
 from ..schemas import (
     ActivityEntry,
     AddMemberRequest,
+    AssignedCard,
     BoardData,
     BoardMember,
     BoardSummary,
+    ColumnData,
     CreateBoardRequest,
+    CreateColumnRequest,
     CreateLabelRequest,
     LabelData,
     RenameColumnRequest,
@@ -19,10 +22,11 @@ router = APIRouter()
 
 @router.get("/api/boards", response_model=list[BoardSummary])
 def list_boards(
+    include_archived: bool = False,
     username: str = Depends(get_current_user),
     repository: BoardRepository = Depends(get_board_repository),
 ) -> list[BoardSummary]:
-    return repository.list_boards(username)
+    return repository.list_boards(username, include_archived)
 
 
 @router.post("/api/boards", status_code=201, response_model=BoardSummary)
@@ -31,7 +35,7 @@ def create_board(
     username: str = Depends(get_current_user),
     repository: BoardRepository = Depends(get_board_repository),
 ) -> BoardSummary:
-    board = repository.create_board(username, request.title)
+    board = repository.create_board(username, request.title, request.template)
     if board is None:
         raise HTTPException(status_code=404, detail="User not found")
     return board
@@ -162,3 +166,52 @@ def list_activity(
     if entries is None:
         raise HTTPException(status_code=404, detail="Board not found")
     return entries
+
+
+@router.post("/api/boards/{board_id}/archive")
+def archive_board(
+    board_id: str,
+    username: str = Depends(get_current_user),
+    repository: BoardRepository = Depends(get_board_repository),
+) -> dict[str, bool]:
+    if not repository.set_board_archived(username, board_id, True):
+        raise HTTPException(
+            status_code=404, detail="Board not found, or you do not own it"
+        )
+    return {"archived": True}
+
+
+@router.post("/api/boards/{board_id}/unarchive")
+def unarchive_board(
+    board_id: str,
+    username: str = Depends(get_current_user),
+    repository: BoardRepository = Depends(get_board_repository),
+) -> dict[str, bool]:
+    if not repository.set_board_archived(username, board_id, False):
+        raise HTTPException(
+            status_code=404, detail="Board not found, or you do not own it"
+        )
+    return {"archived": False}
+
+
+@router.post(
+    "/api/boards/{board_id}/columns", status_code=201, response_model=ColumnData
+)
+def create_column(
+    board_id: str,
+    request: CreateColumnRequest,
+    username: str = Depends(get_current_user),
+    repository: BoardRepository = Depends(get_board_repository),
+) -> ColumnData:
+    column = repository.create_column(username, board_id, request.title)
+    if column is None:
+        raise HTTPException(status_code=404, detail="Board not found")
+    return column
+
+
+@router.get("/api/me/tasks", response_model=list[AssignedCard])
+def list_my_tasks(
+    username: str = Depends(get_current_user),
+    repository: BoardRepository = Depends(get_board_repository),
+) -> list[AssignedCard]:
+    return repository.list_assigned_cards(username)

@@ -52,6 +52,8 @@ def test_cards_carry_due_date_assignee_and_labels(client: TestClient) -> None:
         "assignee": "Ada",
         "labelIds": [label_id],
         "commentCount": 0,
+        "checklistDone": 0,
+        "checklistTotal": 0,
     }
 
 
