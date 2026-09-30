@@ -88,15 +88,13 @@ class OpenRouterClient:
             ) from error
 
         try:
-            content = response.json()["choices"][0]["message"]["content"]
-        except (IndexError, KeyError, TypeError, ValueError) as error:
+            # Only a string content has .strip(); anything else is invalid too.
+            content = response.json()["choices"][0]["message"]["content"].strip()
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError) as error:
             raise OpenRouterProviderError(
                 "OpenRouter returned an invalid response."
             ) from error
 
-        if not isinstance(content, str) or not content.strip():
-            raise OpenRouterProviderError(
-                "OpenRouter returned an invalid response."
-            )
-
-        return content.strip()
+        if not content:
+            raise OpenRouterProviderError("OpenRouter returned an invalid response.")
+        return content

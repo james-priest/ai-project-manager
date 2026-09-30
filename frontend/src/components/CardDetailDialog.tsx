@@ -7,7 +7,13 @@ import { CardChecklist } from "@/components/CardChecklist";
 import { CardComments } from "@/components/CardComments";
 import { CardLabel } from "@/components/CardLabel";
 import { api, type CardFields } from "@/lib/api";
-import { isOverdue, type Card, type Label } from "@/lib/kanban";
+import {
+  getCardLabels,
+  isOverdue,
+  toggleId,
+  type Card,
+  type Label,
+} from "@/lib/kanban";
 
 type CardDetailDialogProps = {
   card: Card;
@@ -116,12 +122,14 @@ export const CardDetailDialog = ({
     setIsEditing(true);
   };
 
+  const updateDraftFields = (changes: Partial<CardFields>) => {
+    setDraftFields((current) => ({ ...current, ...changes }));
+  };
+
   const toggleLabel = (labelId: string) => {
     setDraftFields((current) => ({
       ...current,
-      labelIds: current.labelIds.includes(labelId)
-        ? current.labelIds.filter((id) => id !== labelId)
-        : [...current.labelIds, labelId],
+      labelIds: toggleId(current.labelIds, labelId),
     }));
   };
 
@@ -148,7 +156,8 @@ export const CardDetailDialog = ({
     }
   };
 
-  const cardLabels = labels.filter((label) => card.labelIds.includes(label.id));
+  const cardLabels = getCardLabels(card, labels);
+  const overdue = isOverdue(card, today);
 
   return (
     <div
@@ -212,10 +221,7 @@ export const CardDetailDialog = ({
                   type="date"
                   value={draftFields.dueDate ?? ""}
                   onChange={(event) =>
-                    setDraftFields((current) => ({
-                      ...current,
-                      dueDate: event.target.value || null,
-                    }))
+                    updateDraftFields({ dueDate: event.target.value || null })
                   }
                   aria-label={`Due date for ${card.title}`}
                   disabled={isSaving}
@@ -227,10 +233,7 @@ export const CardDetailDialog = ({
                 <input
                   value={draftFields.assignee}
                   onChange={(event) =>
-                    setDraftFields((current) => ({
-                      ...current,
-                      assignee: event.target.value,
-                    }))
+                    updateDraftFields({ assignee: event.target.value })
                   }
                   list={`assignees-${card.id}`}
                   aria-label={`Assignee for ${card.title}`}
@@ -304,12 +307,12 @@ export const CardDetailDialog = ({
                 <span
                   className={clsx(
                     "rounded-full px-2 py-0.5 text-[0.65rem] font-semibold",
-                    isOverdue(card, today)
+                    overdue
                       ? "bg-red-100 text-red-700"
                       : "bg-[var(--surface)] text-[var(--gray-text)]"
                   )}
                 >
-                  {isOverdue(card, today) ? "Overdue " : "Due "}
+                  {overdue ? "Overdue " : "Due "}
                   {card.dueDate}
                 </span>
               )}

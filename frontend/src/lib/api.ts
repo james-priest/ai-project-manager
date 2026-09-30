@@ -137,6 +137,12 @@ const jsonRequest = <T>(path: string, body: unknown, method: string) =>
     body: JSON.stringify(body),
   });
 
+const cardFieldsBody = (fields: CardFields) => ({
+  due_date: fields.dueDate,
+  assignee: fields.assignee,
+  label_ids: fields.labelIds,
+});
+
 export const api = {
   getCurrentUser: () => request<AuthResponse>("/api/auth/me"),
 
@@ -227,9 +233,7 @@ export const api = {
         column_id: columnId,
         title,
         details,
-        due_date: fields.dueDate,
-        assignee: fields.assignee,
-        label_ids: fields.labelIds,
+        ...cardFieldsBody(fields),
       },
       "POST"
     ),
@@ -242,13 +246,7 @@ export const api = {
   ) =>
     jsonRequest<{ updated: true }>(
       `/api/board/cards/${encodeURIComponent(cardId)}`,
-      {
-        title,
-        details,
-        due_date: fields.dueDate,
-        assignee: fields.assignee,
-        label_ids: fields.labelIds,
-      },
+      { title, details, ...cardFieldsBody(fields) },
       "PATCH"
     ),
 

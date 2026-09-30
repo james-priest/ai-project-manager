@@ -85,6 +85,7 @@ export const BoardSwitcher = ({
       <ul className="flex flex-wrap items-center gap-2">
         {boards.map((board) => {
           const isActive = board.id === activeBoardId;
+          const archiveAction = board.archived ? "Restore" : "Archive";
 
           if (board.id === renamingBoardId) {
             return (
@@ -160,15 +161,11 @@ export const BoardSwitcher = ({
                     <button
                       type="button"
                       onClick={() => void onArchive(board.id, !board.archived)}
-                      aria-label={`${
-                        board.archived ? "Restore" : "Archive"
-                      } ${board.title}`}
-                      title={`${
-                        board.archived ? "Restore" : "Archive"
-                      } ${board.title}`}
+                      aria-label={`${archiveAction} ${board.title}`}
+                      title={`${archiveAction} ${board.title}`}
                       className="rounded-full px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--gray-text)] transition hover:text-[var(--navy-dark)]"
                     >
-                      {board.archived ? "Restore" : "Archive"}
+                      {archiveAction}
                     </button>
                     {boards.length > 1 &&
                       (confirmingDeleteId === board.id ? (

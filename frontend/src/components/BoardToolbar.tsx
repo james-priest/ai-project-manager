@@ -8,11 +8,19 @@ import {
   emptyFilters,
   hasActiveFilters,
   LABEL_COLORS,
+  toggleId,
   type BoardFilters,
   type DueFilter,
   type Label,
   type LabelColor,
 } from "@/lib/kanban";
+
+const DUE_FILTER_LABELS: Record<DueFilter, string> = {
+  any: "Any due date",
+  overdue: "Overdue",
+  week: "Due in 7 days",
+  none: "No due date",
+};
 
 type BoardToolbarProps = {
   labels: Label[];
@@ -61,9 +69,7 @@ export const BoardToolbar = ({
   const toggleLabelFilter = (labelId: string) => {
     onFiltersChange({
       ...filters,
-      labelIds: filters.labelIds.includes(labelId)
-        ? filters.labelIds.filter((id) => id !== labelId)
-        : [...filters.labelIds, labelId],
+      labelIds: toggleId(filters.labelIds, labelId),
     });
   };
 
@@ -149,14 +155,7 @@ export const BoardToolbar = ({
         >
           {DUE_FILTERS.map((due) => (
             <option key={due} value={due}>
-              {
-                {
-                  any: "Any due date",
-                  overdue: "Overdue",
-                  week: "Due in 7 days",
-                  none: "No due date",
-                }[due]
-              }
+              {DUE_FILTER_LABELS[due]}
             </option>
           ))}
         </select>

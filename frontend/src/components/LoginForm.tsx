@@ -3,6 +3,12 @@
 import { useState, type FormEvent } from "react";
 import { ApiError, api } from "@/lib/api";
 
+const STATUS_MESSAGES: Record<number, string> = {
+  401: "Invalid username or password.",
+  409: "That username is already taken.",
+  422: "Usernames need 3+ letters, numbers, - or _, and passwords need 8+ characters.",
+};
+
 type LoginFormProps = {
   onAuthenticated: (username: string) => void | Promise<void>;
 };
@@ -26,29 +32,22 @@ export const LoginForm = ({ onAuthenticated }: LoginFormProps) => {
         : await api.login(username, password);
       await onAuthenticated(data.username);
     } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        setError("Invalid username or password.");
-        return;
-      }
-      if (error instanceof ApiError && error.status === 409) {
-        setError("That username is already taken.");
-        return;
-      }
-      if (error instanceof ApiError && error.status === 422) {
-        setError(
-          "Usernames need 3+ letters, numbers, - or _, and passwords need 8+ characters."
-        );
-        return;
-      }
+      const statusMessage =
+        error instanceof ApiError ? STATUS_MESSAGES[error.status] : undefined;
       setError(
-        isRegistering
-          ? "Unable to create your account. Please try again."
-          : "Unable to sign in. Please try again."
+        statusMessage ??
+          (isRegistering
+            ? "Unable to create your account. Please try again."
+            : "Unable to sign in. Please try again.")
       );
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  const [submitLabel, submittingLabel] = isRegistering
+    ? ["Create account", "Creating account..."]
+    : ["Sign in", "Signing in..."];
 
   return (
     <main className="flex min-h-screen items-center justify-center px-6 py-12">
@@ -117,13 +116,7 @@ export const LoginForm = ({ onAuthenticated }: LoginFormProps) => {
             disabled={isSubmitting}
             className="w-full rounded-full bg-[var(--secondary-purple)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:brightness-110 disabled:cursor-wait disabled:opacity-60"
           >
-            {isSubmitting
-              ? isRegistering
-                ? "Creating account..."
-                : "Signing in..."
-              : isRegistering
-                ? "Create account"
-                : "Sign in"}
+            {isSubmitting ? submittingLabel : submitLabel}
           </button>
         </form>
 

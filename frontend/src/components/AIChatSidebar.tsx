@@ -116,10 +116,11 @@ export const AIChatSidebar = ({
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const nextQuestion = question.trim();
-    if (!nextQuestion || isSubmitting) {
-      if (!nextQuestion) {
-        setError("Ask a question before sending.");
-      }
+    if (!nextQuestion) {
+      setError("Ask a question before sending.");
+      return;
+    }
+    if (isSubmitting) {
       return;
     }
 
@@ -196,23 +197,17 @@ export const AIChatSidebar = ({
       return;
     }
 
-    const deltaX = event.clientX - interaction.startX;
-    const deltaY = event.clientY - interaction.startY;
-    const viewport = getViewportSize();
-    setGeometry(
+    const applyDelta =
       interaction.type === "drag"
-        ? moveAssistantGeometry(
-            interaction.geometry,
-            deltaX,
-            deltaY,
-            viewport
-          )
-        : resizeAssistantGeometry(
-            interaction.geometry,
-            deltaX,
-            deltaY,
-            viewport
-          )
+        ? moveAssistantGeometry
+        : resizeAssistantGeometry;
+    setGeometry(
+      applyDelta(
+        interaction.geometry,
+        event.clientX - interaction.startX,
+        event.clientY - interaction.startY,
+        getViewportSize()
+      )
     );
   };
 

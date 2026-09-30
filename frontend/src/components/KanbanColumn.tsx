@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import type { Card, Column, Label } from "@/lib/kanban";
@@ -46,19 +46,9 @@ export const KanbanColumn = ({
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const cancelTitleEditRef = useRef(false);
 
-  useEffect(() => {
-    // Do not overwrite what the user is typing when the board updates.
-    if (!isEditingTitle) {
-      setDraftTitle(column.title);
-    }
-  }, [column.title, isEditingTitle]);
-
   const saveTitle = async () => {
     const nextTitle = draftTitle.trim();
     if (!nextTitle || nextTitle === column.title || isSavingTitle) {
-      if (!nextTitle) {
-        setDraftTitle(column.title);
-      }
       return;
     }
 
@@ -89,9 +79,13 @@ export const KanbanColumn = ({
             </span>
           </div>
           <input
-            value={draftTitle}
+            // Board updates never overwrite what the user is typing.
+            value={isEditingTitle ? draftTitle : column.title}
             onChange={(event) => setDraftTitle(event.target.value)}
-            onFocus={() => setIsEditingTitle(true)}
+            onFocus={() => {
+              setDraftTitle(column.title);
+              setIsEditingTitle(true);
+            }}
             onBlur={() => {
               setIsEditingTitle(false);
               if (cancelTitleEditRef.current) {
@@ -107,7 +101,6 @@ export const KanbanColumn = ({
               if (event.key === "Escape") {
                 event.preventDefault();
                 cancelTitleEditRef.current = true;
-                setDraftTitle(column.title);
                 event.currentTarget.blur();
               }
             }}
