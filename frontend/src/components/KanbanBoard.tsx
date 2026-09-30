@@ -89,7 +89,7 @@ export const KanbanBoard = ({
   isLoggingOut = false,
   onSessionExpired,
 }: KanbanBoardProps) => {
-  const [board, setBoard] = useState<BoardData>(() => initialBoard);
+  const [board, setBoard] = useState(initialBoard);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [filters, setFilters] = useState<BoardFilters>(emptyFilters);
@@ -112,7 +112,7 @@ export const KanbanBoard = ({
 
   const trackMutation = <T,>(request: Promise<T>): Promise<T> => {
     mutationCount.current += 1;
-    noteBoardChanged();
+    setBoardVersion((version) => version + 1);
     pendingMutations.current.add(request);
     const forget = () => {
       pendingMutations.current.delete(request);
@@ -121,14 +121,20 @@ export const KanbanBoard = ({
     return request;
   };
 
-  const noteBoardChanged = () => setBoardVersion((version) => version + 1);
-
   const handleMutationError = (error: unknown, fallback: string) => {
     if (isSessionExpiredError(error)) {
       onSessionExpired?.();
       return;
     }
     setMutationError(getApiErrorMessage(error, fallback));
+  };
+
+  // Card forms show their own message; only session expiry needs the board.
+  const rethrowForForm = (error: unknown): never => {
+    if (isSessionExpiredError(error)) {
+      onSessionExpired?.();
+    }
+    throw error;
   };
 
   // The assistant's board snapshot can predate edits made while it was
@@ -177,29 +183,23 @@ export const KanbanBoard = ({
       return;
     }
 
-    setMutationError(null);
-    setBoard((prev) => ({
-      ...prev,
-      columns: moveCardToPosition(
-        prev.columns,
-        drop.activeId,
-        drop.toColumnId,
-        drop.toPosition
-      ),
-    }));
-
-    void trackMutation(
-      api.moveCard(drop.activeId, drop.toColumnId, drop.toPosition)
-    ).catch((error: unknown) => {
+    const placeCard = (columnId: string, position: number) =>
       setBoard((prev) => ({
         ...prev,
         columns: moveCardToPosition(
           prev.columns,
           drop.activeId,
-          drop.fromColumnId,
-          drop.fromPosition
+          columnId,
+          position
         ),
       }));
+
+    setMutationError(null);
+    placeCard(drop.toColumnId, drop.toPosition);
+    void trackMutation(
+      api.moveCard(drop.activeId, drop.toColumnId, drop.toPosition)
+    ).catch((error: unknown) => {
+      placeCard(drop.fromColumnId, drop.fromPosition);
       handleMutationError(error, "Unable to move card. Please try again.");
     });
   };
@@ -236,11 +236,7 @@ export const KanbanBoard = ({
         )
       );
     } catch (error) {
-      // The form shows its own message; only session expiry needs the board.
-      if (isSessionExpiredError(error)) {
-        onSessionExpired?.();
-      }
-      throw error;
+      rethrowForForm(error);
     }
   };
 
@@ -266,11 +262,7 @@ export const KanbanBoard = ({
       await trackMutation(api.updateCard(cardId, title, details, fields));
     } catch (error) {
       setBoard((prev) => setCard(prev, previousCard));
-      // The card's edit form shows its own message.
-      if (isSessionExpiredError(error)) {
-        onSessionExpired?.();
-      }
-      throw error;
+      rethrowForForm(error);
     }
   };
 
@@ -291,71 +283,61 @@ export const KanbanBoard = ({
     }
   };
 
-  const handleAddColumn = async (title: string) => {
+  // For changes the server shapes (columns, labels): save, then reload.
+  const mutateAndRefresh = async (
+    request: () => Promise<unknown>,
+    fallback: string
+  ) => {
     setMutationError(null);
     try {
-      await trackMutation(api.createColumn(boardId, title));
+      await trackMutation(request());
       await refreshBoard();
     } catch (error) {
-      handleMutationError(error, "Unable to add that column. Please try again.");
+      handleMutationError(error, fallback);
     }
   };
 
-  const handleMoveColumn = async (columnId: string, position: number) => {
-    setMutationError(null);
-    try {
-      await trackMutation(api.moveColumn(columnId, position));
-      await refreshBoard();
-    } catch (error) {
-      handleMutationError(error, "Unable to move that column. Please try again.");
-    }
-  };
+  const handleAddColumn = (title: string) =>
+    mutateAndRefresh(
+      () => api.createColumn(boardId, title),
+      "Unable to add that column. Please try again."
+    );
 
-  const handleDeleteColumn = async (columnId: string) => {
-    setMutationError(null);
-    try {
-      await trackMutation(api.deleteColumn(columnId));
-      await refreshBoard();
-    } catch (error) {
-      handleMutationError(
-        error,
-        "Unable to delete that column. Please try again."
-      );
-    }
-  };
+  const handleMoveColumn = (columnId: string, position: number) =>
+    mutateAndRefresh(
+      () => api.moveColumn(columnId, position),
+      "Unable to move that column. Please try again."
+    );
 
-  const handleCreateLabel = async (name: string, color: LabelColor) => {
-    setMutationError(null);
-    try {
-      await trackMutation(api.createLabel(boardId, name, color));
-      await refreshBoard();
-    } catch (error) {
-      handleMutationError(error, "Unable to add that label. Please try again.");
-    }
-  };
+  const handleDeleteColumn = (columnId: string) =>
+    mutateAndRefresh(
+      () => api.deleteColumn(columnId),
+      "Unable to delete that column. Please try again."
+    );
 
-  const handleDeleteLabel = async (labelId: string) => {
-    setMutationError(null);
+  const handleCreateLabel = (name: string, color: LabelColor) =>
+    mutateAndRefresh(
+      () => api.createLabel(boardId, name, color),
+      "Unable to add that label. Please try again."
+    );
+
+  const handleDeleteLabel = (labelId: string) => {
     setFilters((current) => ({
       ...current,
       labelIds: current.labelIds.filter((id) => id !== labelId),
     }));
-    try {
-      await trackMutation(api.deleteLabel(boardId, labelId));
-      await refreshBoard();
-    } catch (error) {
-      handleMutationError(
-        error,
-        "Unable to remove that label. Please try again."
-      );
-    }
+    return mutateAndRefresh(
+      () => api.deleteLabel(boardId, labelId),
+      "Unable to remove that label. Please try again."
+    );
   };
 
-  const activeBoardRole =
-    boards.find((summary) => summary.id === boardId)?.role ?? "owner";
+  const activeBoard = boards.find((summary) => summary.id === boardId);
   const boardLabels = Object.values(board.labels);
   const openCard = openCardId ? board.cards[openCardId] : null;
   const visibleBoard = filterBoard(board, filters, today);
+  const visibleCount = countVisibleCards(visibleBoard);
+  const totalCount = Object.keys(board.cards).length;
   const activeCard = activeCardId ? board.cards[activeCardId] : null;
 
   return (
@@ -379,8 +361,7 @@ export const KanbanBoard = ({
                 Single Board Kanban
               </p>
               <h1 className="mt-3 font-display text-4xl font-semibold text-[var(--navy-dark)]">
-                {boards.find((summary) => summary.id === boardId)?.title ??
-                  "Kanban Studio"}
+                {activeBoard?.title ?? "Kanban Studio"}
               </h1>
               <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--gray-text)]">
                 Keep momentum visible. Rename columns, drag cards between stages,
@@ -454,15 +435,15 @@ export const KanbanBoard = ({
 
         <CollaborationPanel
           boardId={boardId}
-          canManageMembers={activeBoardRole === "owner"}
+          canManageMembers={(activeBoard?.role ?? "owner") === "owner"}
           onError={setMutationError}
         />
 
         <BoardToolbar
           labels={boardLabels}
           filters={filters}
-          visibleCount={countVisibleCards(visibleBoard)}
-          totalCount={Object.keys(board.cards).length}
+          visibleCount={visibleCount}
+          totalCount={totalCount}
           onFiltersChange={setFilters}
           onCreateLabel={handleCreateLabel}
           onDeleteLabel={handleDeleteLabel}
@@ -495,9 +476,7 @@ export const KanbanBoard = ({
             <NewColumnForm onAdd={handleAddColumn} />
           </section>
 
-          {board.columns.length > 0 &&
-            countVisibleCards(visibleBoard) === 0 &&
-            Object.keys(board.cards).length > 0 && (
+          {board.columns.length > 0 && visibleCount === 0 && totalCount > 0 && (
               <p
                 role="status"
                 className="rounded-2xl border border-dashed border-[var(--stroke)] px-4 py-6 text-center text-sm text-[var(--gray-text)]"

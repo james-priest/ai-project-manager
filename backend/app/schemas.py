@@ -1,9 +1,21 @@
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 MAX_TEXT_LENGTH = 2_000
 MAX_HISTORY_MESSAGES = 50
+
+
+# Shared field validators, attached with `field_validator(...)(function)`.
+def required_text(value: str, info: ValidationInfo) -> str:
+    value = value.strip()
+    if not value:
+        raise ValueError(f"{info.field_name} must not be blank")
+    return value
+
+
+def stripped_text(value: str) -> str:
+    return value.strip()
 
 
 class LabelData(BaseModel):
@@ -21,13 +33,7 @@ class ChecklistItem(BaseModel):
 class CreateChecklistItemRequest(BaseModel):
     text: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
 
-    @field_validator("text")
-    @classmethod
-    def clean_text(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("text must not be blank")
-        return value
+    _clean_text = field_validator("text")(required_text)
 
 
 class UpdateChecklistItemRequest(BaseModel):
@@ -68,23 +74,14 @@ class CardFields(BaseModel):
     assignee: str = Field(default="", max_length=100)
     label_ids: list[str] = Field(default_factory=list, max_length=20)
 
-    @field_validator("assignee")
-    @classmethod
-    def clean_assignee(cls, value: str) -> str:
-        return value.strip()
+    _clean_assignee = field_validator("assignee")(stripped_text)
 
 
 class CreateLabelRequest(BaseModel):
     name: str = Field(min_length=1, max_length=40)
     color: str = "blue"
 
-    @field_validator("name")
-    @classmethod
-    def clean_name(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("name must not be blank")
-        return value
+    _clean_name = field_validator("name")(required_text)
 
     @field_validator("color")
     @classmethod
@@ -108,13 +105,7 @@ class BoardSummary(BaseModel):
 class CreateColumnRequest(BaseModel):
     title: str = Field(max_length=MAX_TEXT_LENGTH)
 
-    @field_validator("title")
-    @classmethod
-    def title_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("title must not be blank")
-        return value
+    _clean_title = field_validator("title")(required_text)
 
 
 class MoveColumnRequest(BaseModel):
@@ -145,13 +136,7 @@ class CommentData(BaseModel):
 class CreateCommentRequest(BaseModel):
     body: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
 
-    @field_validator("body")
-    @classmethod
-    def clean_body(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("body must not be blank")
-        return value
+    _clean_body = field_validator("body")(required_text)
 
 
 class AssignedCard(BaseModel):
@@ -192,13 +177,7 @@ class CreateBoardRequest(BaseModel):
             raise ValueError(f"template must be one of {sorted(BOARD_TEMPLATES)}")
         return value
 
-    @field_validator("title")
-    @classmethod
-    def title_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("title must not be blank")
-        return value
+    _clean_title = field_validator("title")(required_text)
 
 
 class RegisterRequest(BaseModel):
@@ -223,13 +202,7 @@ class ConversationMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(max_length=MAX_TEXT_LENGTH)
 
-    @field_validator("content")
-    @classmethod
-    def content_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("content must not be blank")
-        return value
+    _clean_content = field_validator("content")(required_text)
 
 
 class CreateCardOperation(BaseModel):
@@ -242,26 +215,8 @@ class CreateCardOperation(BaseModel):
     assignee: str = Field(default="", max_length=100)
     label_ids: list[str] = Field(default_factory=list, max_length=20)
 
-    @field_validator("column_id")
-    @classmethod
-    def column_id_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("column_id must not be blank")
-        return value
-
-    @field_validator("title")
-    @classmethod
-    def title_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("title must not be blank")
-        return value
-
-    @field_validator("details")
-    @classmethod
-    def clean_details(cls, value: str) -> str:
-        return value.strip()
+    _clean_required = field_validator("column_id", "title")(required_text)
+    _clean_details = field_validator("details")(stripped_text)
 
 
 class EditCardOperation(BaseModel):
@@ -279,26 +234,8 @@ class EditCardOperation(BaseModel):
     assignee: str | None = Field(default=None, max_length=100)
     label_ids: list[str] | None = Field(default=None, max_length=20)
 
-    @field_validator("card_id")
-    @classmethod
-    def card_id_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("card_id must not be blank")
-        return value
-
-    @field_validator("title")
-    @classmethod
-    def title_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("title must not be blank")
-        return value
-
-    @field_validator("details")
-    @classmethod
-    def clean_details(cls, value: str) -> str:
-        return value.strip()
+    _clean_required = field_validator("card_id", "title")(required_text)
+    _clean_details = field_validator("details")(stripped_text)
 
 
 class MoveCardOperation(BaseModel):
@@ -338,13 +275,7 @@ class DeleteCardOperation(BaseModel):
     operation: Literal["delete_card"]
     card_id: str = Field(min_length=1)
 
-    @field_validator("card_id")
-    @classmethod
-    def card_id_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("card_id must not be blank")
-        return value
+    _clean_card_id = field_validator("card_id")(required_text)
 
 
 BoardOperation = Annotated[
@@ -366,26 +297,14 @@ class AIChatRequest(BaseModel):
         default_factory=list, max_length=MAX_HISTORY_MESSAGES
     )
 
-    @field_validator("question")
-    @classmethod
-    def question_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("question must not be blank")
-        return value
+    _clean_question = field_validator("question")(required_text)
 
 
 class AIModelResponse(BaseModel):
     response: str
     operations: list[BoardOperation] = Field(default_factory=list)
 
-    @field_validator("response")
-    @classmethod
-    def response_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("response must not be blank")
-        return value
+    _clean_response = field_validator("response")(required_text)
 
 
 class AIChatResponse(BaseModel):
@@ -397,50 +316,19 @@ class AIChatResponse(BaseModel):
 class RenameColumnRequest(BaseModel):
     title: str = Field(max_length=MAX_TEXT_LENGTH)
 
-    @field_validator("title")
-    @classmethod
-    def title_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("title must not be blank")
-        return value
-
-
-class CreateCardRequest(CardFields):
-    column_id: str = Field(min_length=1)
-    title: str = Field(max_length=MAX_TEXT_LENGTH)
-    details: str = Field(default="", max_length=MAX_TEXT_LENGTH)
-
-    @field_validator("title")
-    @classmethod
-    def title_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("title must not be blank")
-        return value
-
-    @field_validator("details")
-    @classmethod
-    def clean_details(cls, value: str) -> str:
-        return value.strip()
+    _clean_title = field_validator("title")(required_text)
 
 
 class UpdateCardRequest(CardFields):
     title: str = Field(max_length=MAX_TEXT_LENGTH)
     details: str = Field(default="", max_length=MAX_TEXT_LENGTH)
 
-    @field_validator("title")
-    @classmethod
-    def title_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("title must not be blank")
-        return value
+    _clean_title = field_validator("title")(required_text)
+    _clean_details = field_validator("details")(stripped_text)
 
-    @field_validator("details")
-    @classmethod
-    def clean_details(cls, value: str) -> str:
-        return value.strip()
+
+class CreateCardRequest(UpdateCardRequest):
+    column_id: str = Field(min_length=1)
 
 
 class MoveCardRequest(BaseModel):

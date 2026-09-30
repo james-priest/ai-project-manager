@@ -60,23 +60,21 @@ export const CardChecklist = ({
     }
   };
 
+  const setItemDone = (itemId: string, done: boolean) => {
+    setItems((current) =>
+      current.map((entry) => (entry.id === itemId ? { ...entry, done } : entry))
+    );
+  };
+
   const handleToggle = async (item: ChecklistItem) => {
     setError(null);
     // Tick straight away; put it back if the server disagrees.
-    setItems((current) =>
-      current.map((entry) =>
-        entry.id === item.id ? { ...entry, done: !entry.done } : entry
-      )
-    );
+    setItemDone(item.id, !item.done);
     try {
       await api.setChecklistItemDone(item.id, !item.done);
       onChecklistChanged();
     } catch (toggleError) {
-      setItems((current) =>
-        current.map((entry) =>
-          entry.id === item.id ? { ...entry, done: item.done } : entry
-        )
-      );
+      setItemDone(item.id, item.done);
       setError(getApiErrorMessage(toggleError, "Unable to update that step."));
     }
   };

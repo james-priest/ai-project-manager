@@ -119,8 +119,15 @@ export const filterBoard = (
 export const countVisibleCards = (board: BoardData) =>
   board.columns.reduce((total, column) => total + column.cardIds.length, 0);
 
-export const isOverdue = (card: Card, today: string) =>
+export const isOverdue = (card: Pick<Card, "dueDate">, today: string) =>
   card.dueDate !== null && card.dueDate < today;
+
+export const getCardLabels = (card: Card, labels: Label[]) =>
+  labels.filter((label) => card.labelIds.includes(label.id));
+
+/** Adds the id when it is missing and removes it when present. */
+export const toggleId = (ids: string[], id: string) =>
+  ids.includes(id) ? ids.filter((existing) => existing !== id) : [...ids, id];
 
 export const findCardColumn = (columns: Column[], id: string) =>
   columns.find((column) => column.id === id || column.cardIds.includes(id));
@@ -163,15 +170,9 @@ export const moveCardToPosition = (
   targetColumnId: string,
   position: number
 ): Column[] => {
-  const activeColumnId = findCardColumn(columns, activeId)?.id;
+  const activeColumn = findCardColumn(columns, activeId);
   const targetColumn = columns.find((column) => column.id === targetColumnId);
-
-  if (!activeColumnId || !targetColumn) {
-    return columns;
-  }
-
-  const activeColumn = columns.find((column) => column.id === activeColumnId);
-  if (!activeColumn) {
+  if (!activeColumn || !targetColumn) {
     return columns;
   }
 
@@ -188,14 +189,11 @@ export const moveCardToPosition = (
   nextTargetCardIds.splice(insertIndex, 0, activeId);
 
   return columns.map((column) => {
-    if (column.id === activeColumnId && column.id === targetColumnId) {
-      return { ...column, cardIds: nextTargetCardIds };
-    }
-    if (column.id === activeColumnId) {
-      return { ...column, cardIds: nextActiveCardIds };
-    }
     if (column.id === targetColumnId) {
       return { ...column, cardIds: nextTargetCardIds };
+    }
+    if (column.id === activeColumn.id) {
+      return { ...column, cardIds: nextActiveCardIds };
     }
     return column;
   });

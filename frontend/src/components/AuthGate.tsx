@@ -6,6 +6,7 @@ import { LoginForm } from "@/components/LoginForm";
 import {
   ApiError,
   api,
+  isSessionExpiredError,
   type BoardSummary,
   type BoardTemplate,
 } from "@/lib/api";
@@ -28,17 +29,11 @@ export const AuthGate = () => {
   const [pendingCardId, setPendingCardId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const handleLoadError = useCallback((loadError: unknown) => {
-    if (loadError instanceof ApiError && loadError.status === 401) {
-      setBoard(null);
-      setBoards([]);
-      setActiveBoardId(null);
-      setWorkspaceState("unauthenticated");
-      return;
-    }
-
-    setError("Unable to load your board. Please try again.");
-    setWorkspaceState("error");
+  const handleSignedOut = useCallback(() => {
+    setBoard(null);
+    setBoards([]);
+    setActiveBoardId(null);
+    setWorkspaceState("unauthenticated");
   }, []);
 
   // Loads the board list and opens one of them; keeps the current board when
@@ -62,22 +57,20 @@ export const AuthGate = () => {
         setBoard(await api.getBoard(nextBoardId));
         setWorkspaceState("authenticated");
       } catch (loadError) {
-        handleLoadError(loadError);
+        if (isSessionExpiredError(loadError)) {
+          handleSignedOut();
+          return;
+        }
+        setError("Unable to load your board. Please try again.");
+        setWorkspaceState("error");
       }
     },
-    [handleLoadError, showArchived]
+    [handleSignedOut, showArchived]
   );
 
   useEffect(() => {
     void loadWorkspace();
   }, [loadWorkspace]);
-
-  const handleSessionExpired = useCallback(() => {
-    setBoard(null);
-    setBoards([]);
-    setActiveBoardId(null);
-    setWorkspaceState("unauthenticated");
-  }, []);
 
   const runBoardAction = async (action: () => Promise<string | undefined>) => {
     setError(null);
@@ -85,8 +78,8 @@ export const AuthGate = () => {
       const preferredBoardId = await action();
       await loadWorkspace(preferredBoardId);
     } catch (actionError) {
-      if (actionError instanceof ApiError && actionError.status === 401) {
-        handleSessionExpired();
+      if (isSessionExpiredError(actionError)) {
+        handleSignedOut();
         return;
       }
       setError(
@@ -145,10 +138,7 @@ export const AuthGate = () => {
 
     try {
       await api.logout();
-      setBoard(null);
-      setBoards([]);
-      setActiveBoardId(null);
-      setWorkspaceState("unauthenticated");
+      handleSignedOut();
     } catch {
       setError("Unable to sign out. Please try again.");
     } finally {
@@ -189,7 +179,7 @@ export const AuthGate = () => {
 
   return (
     <>
-      {error && workspaceState === "authenticated" && (
+      {error && (
         <p
           role="alert"
           className="fixed right-6 top-20 z-10 rounded-xl bg-red-100 px-4 py-3 text-sm font-semibold text-red-800 shadow-lg"
@@ -214,7 +204,7 @@ export const AuthGate = () => {
           onShowArchivedBoardsChange={setShowArchived}
           onLogout={handleLogout}
           isLoggingOut={isLoggingOut}
-          onSessionExpired={handleSessionExpired}
+          onSessionExpired={handleSignedOut}
         />
       )}
     </>

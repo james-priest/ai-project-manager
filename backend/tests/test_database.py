@@ -66,6 +66,29 @@ def test_repository_mutations_preserve_order_and_persist(tmp_path: Path) -> None
     assert after_delete.columns[3].cardIds == ["card-6"]
 
 
+def test_rename_column_works_on_every_board_the_user_belongs_to(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "kanban.db"
+    initialize_database(database_path)
+    repository = BoardRepository(database_path)
+    second = repository.create_board("user", "Second board")
+    assert second is not None
+    second_board = repository.get_board_by_id("user", second.id)
+    assert second_board is not None
+    second_column_id = second_board.columns[0].id
+
+    assert repository.rename_column("user", "col-backlog", "First renamed")
+    assert repository.rename_column("user", second_column_id, "Second renamed")
+
+    first_board = repository.get_board("user")
+    assert first_board is not None
+    assert first_board.columns[0].title == "First renamed"
+    second_board = repository.get_board_by_id("user", second.id)
+    assert second_board is not None
+    assert second_board.columns[0].title == "Second renamed"
+
+
 def test_repository_can_reorder_a_card_within_one_column(tmp_path: Path) -> None:
     database_path = tmp_path / "kanban.db"
     initialize_database(database_path)

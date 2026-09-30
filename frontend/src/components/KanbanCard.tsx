@@ -3,7 +3,12 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import clsx from "clsx";
 import { CardLabel } from "@/components/CardLabel";
-import { isOverdue, type Card, type Label } from "@/lib/kanban";
+import {
+  getCardLabels,
+  isOverdue,
+  type Card,
+  type Label,
+} from "@/lib/kanban";
 
 type KanbanCardProps = {
   card: Card;
@@ -40,7 +45,8 @@ export const KanbanCard = ({
     transform: CSS.Transform.toString(transform),
     transition,
   };
-  const cardLabels = labels.filter((label) => card.labelIds.includes(label.id));
+  const cardLabels = getCardLabels(card, labels);
+  const overdue = isOverdue(card, today);
 
   return (
     <article
@@ -139,12 +145,12 @@ export const KanbanCard = ({
                 <span
                   className={clsx(
                     "rounded-full px-2 py-0.5 text-[0.65rem] font-semibold",
-                    isOverdue(card, today)
+                    overdue
                       ? "bg-red-100 text-red-700"
                       : "bg-[var(--surface)] text-[var(--gray-text)]"
                   )}
                 >
-                  {isOverdue(card, today) ? "Overdue " : "Due "}
+                  {overdue ? "Overdue " : "Due "}
                   {card.dueDate}
                 </span>
               )}

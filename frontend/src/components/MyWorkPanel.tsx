@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { CardLabel } from "@/components/CardLabel";
 import { api, getApiErrorMessage, type AssignedCard } from "@/lib/api";
+import { isOverdue } from "@/lib/kanban";
 
 type MyWorkPanelProps = {
   today: string;
@@ -22,23 +23,19 @@ export const MyWorkPanel = ({
   const [isOpen, setIsOpen] = useState(false);
   const [tasks, setTasks] = useState<AssignedCard[]>([]);
 
-  const load = useCallback(async () => {
-    try {
-      setTasks(await api.listMyTasks());
-    } catch (error) {
-      onError(getApiErrorMessage(error, "Unable to load your tasks."));
-    }
-  }, [onError]);
-
   useEffect(() => {
-    if (isOpen) {
-      void load();
+    if (!isOpen) {
+      return;
     }
-  }, [isOpen, load, refreshKey]);
+    api
+      .listMyTasks()
+      .then(setTasks)
+      .catch((error: unknown) => {
+        onError(getApiErrorMessage(error, "Unable to load your tasks."));
+      });
+  }, [isOpen, onError, refreshKey]);
 
-  const overdue = tasks.filter(
-    (task) => task.dueDate !== null && task.dueDate < today
-  );
+  const overdueCount = tasks.filter((task) => isOverdue(task, today)).length;
 
   return (
     <section
@@ -52,9 +49,9 @@ export const MyWorkPanel = ({
         className="rounded-full border border-dashed border-[var(--stroke)] px-4 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--primary-blue)] transition hover:border-[var(--primary-blue)]"
       >
         My work
-        {isOpen && overdue.length > 0 && (
+        {isOpen && overdueCount > 0 && (
           <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-[0.65rem] text-red-700">
-            {overdue.length} overdue
+            {overdueCount} overdue
           </span>
         )}
       </button>
@@ -67,8 +64,7 @@ export const MyWorkPanel = ({
         ) : (
           <ul aria-label="Assigned cards" className="mt-3 space-y-2">
             {tasks.map((task) => {
-              const isOverdue =
-                task.dueDate !== null && task.dueDate < today;
+              const overdue = isOverdue(task, today);
               return (
                 <li key={task.cardId}>
                   <button
@@ -87,12 +83,12 @@ export const MyWorkPanel = ({
                       <span
                         className={clsx(
                           "rounded-full px-2 py-0.5 text-[0.65rem] font-semibold",
-                          isOverdue
+                          overdue
                             ? "bg-red-100 text-red-700"
                             : "bg-white text-[var(--gray-text)]"
                         )}
                       >
-                        {isOverdue ? "Overdue " : "Due "}
+                        {overdue ? "Overdue " : "Due "}
                         {task.dueDate}
                       </span>
                     )}
